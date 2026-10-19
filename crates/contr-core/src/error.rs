@@ -16,9 +16,22 @@ pub enum ErrorReason {
     SettingLocked,
     /// The daemon or its backend does not support the request.
     FeatureUnavailable,
+    /// No container engine is installed for the backend to manage.
+    EngineNotInstalled,
 }
 
 impl ErrorReason {
+    /// Every reason, in `contr.common.v1.ErrorReason` number order.
+    pub const ALL: [Self; 7] = [
+        Self::EngineNotRunning,
+        Self::WslNotInstalled,
+        Self::VirtualizationDisabled,
+        Self::SocketPermissionDenied,
+        Self::SettingLocked,
+        Self::FeatureUnavailable,
+        Self::EngineNotInstalled,
+    ];
+
     /// Name sent in `google.rpc.ErrorInfo.reason`; clients branch on it.
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -28,7 +41,13 @@ impl ErrorReason {
             Self::SocketPermissionDenied => "SOCKET_PERMISSION_DENIED",
             Self::SettingLocked => "SETTING_LOCKED",
             Self::FeatureUnavailable => "FEATURE_UNAVAILABLE",
+            Self::EngineNotInstalled => "ENGINE_NOT_INSTALLED",
         }
+    }
+
+    /// Parses a name produced by [`Self::as_str`].
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|reason| reason.as_str() == name)
     }
 }
 
@@ -38,11 +57,44 @@ impl fmt::Display for ErrorReason {
     }
 }
 
-/// Action the daemon can run to resolve a failed precondition.
+/// Action the daemon can run to resolve a failed precondition; mirrors `contr.common.v1.Remediation`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Remediation {
-    /// Stable identifier clients send back to run the action.
+    /// Stable identifier clients send back to run the action; renaming one breaks deployed clients.
     pub action_id: &'static str,
     /// The action shows an operating-system elevation prompt.
     pub requires_elevation: bool,
+}
+
+impl Remediation {
+    /// Installs the host's container engine packages.
+    pub const INSTALL_ENGINE: Self = Self {
+        action_id: "install-engine",
+        requires_elevation: true,
+    };
+
+    /// Adds the user to the `docker` group, which makes the user root-equivalent on the host.
+    pub const JOIN_DOCKER_GROUP: Self = Self {
+        action_id: "join-docker-group",
+        requires_elevation: true,
+    };
+
+    /// Sets up a rootless engine for the user.
+    pub const SETUP_ROOTLESS: Self = Self {
+        action_id: "setup-rootless",
+        requires_elevation: false,
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_round_trip() {
+        for reason in ErrorReason::ALL {
+            assert_eq!(ErrorReason::from_name(reason.as_str()), Some(reason));
+        }
+        assert_eq!(ErrorReason::from_name("UNSPECIFIED"), None);
+    }
 }
