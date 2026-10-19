@@ -3,6 +3,7 @@
 #![warn(missing_docs)]
 
 mod error;
+pub mod paths;
 pub mod product;
 
 pub use error::{ErrorReason, Remediation};

@@ -36,8 +36,23 @@ pub const WSL_DATA_DISTRO: &str = "contr-data";
 /// Environment variable that overrides daemon endpoint discovery.
 pub const HOST_ENV: &str = "CONTR_HOST";
 
+/// Environment variable holding the daemon's log filter, in `tracing-subscriber` `EnvFilter` syntax.
+pub const LOG_ENV: &str = "CONTR_LOG";
+
 /// File name of the daemon's gRPC socket inside the user's runtime directory.
 pub const API_SOCKET_FILE: &str = "contrd.sock";
+
+/// File in the user's runtime directory where the running daemon publishes its endpoints.
+pub const DISCOVERY_FILE: &str = "daemon.json";
+
+/// systemd user unit that runs the daemon.
+pub const DAEMON_UNIT: &str = "contrd.service";
+
+/// Log file in the user's runtime directory for a daemon an SDK started without systemd.
+pub const DAEMON_LOG_FILE: &str = "contrd.log";
+
+/// `google.rpc.ErrorInfo.domain` of every error the daemon reports.
+pub const ERROR_DOMAIN: &str = "io.github.contr_hq.contr";
 
 /// polkit action that authorizes engine installation and service management.
 pub const POLKIT_MANAGE_ENGINE: &str = "io.github.contr_hq.contr.manage-engine";
