@@ -8,10 +8,21 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+fake = ["dep:contr-testkit"]
+
 [dependencies]
 async-trait.workspace = true
 contr-core.workspace = true
+contr-testkit = { workspace = true, optional = true }
 thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tokio-stream.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+futures-util.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "sync", "test-util", "time"] }
 
 [lints]
 workspace = true
