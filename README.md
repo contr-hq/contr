@@ -16,7 +16,8 @@ generator. The desktop clients live in their own repositories and talk to the da
 
 ## Status
 
-Phase 0: workspace, API contract, project rules. Nothing is usable yet.
+Phase 1: on Linux, `contrd` manages a Docker Engine or Podman installed on the host and serves the gRPC API on a
+per-user socket. The `contr` CLI, the Rust SDK and the generated C# SDK talk to it. Windows backends come in Phase 2.
 
 ## Layout
 
@@ -30,6 +31,8 @@ Phase 0: workspace, API contract, project rules. Nothing is usable yet.
 | `crates/contr-cli` | `contr` |
 | `crates/contr-sdkgen` | `contr-sdkgen`, the SDK generator |
 | `crates/*` | Remaining crates, one per responsibility; see each crate's description |
+| `sdk/csharp/` | Template of the generated C# SDK, its conformance program and samples |
+| `packaging/linux/` | systemd user units for socket activation |
 | `specs/` | Clean-room specifications |
 | `docs/adr/` | Architecture decisions |
 
@@ -40,6 +43,22 @@ cargo build --workspace
 cargo test --workspace --all-features
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo xtask codegen    # after editing proto/
+```
+
+Run the daemon and CLI from a build tree; `contr start` starts `contrd` when nothing answers:
+
+```sh
+cargo build --package contr-daemon --package contr-cli
+target/debug/contr start
+target/debug/contr status
+docker --context contr ps
+```
+
+Generate the C# SDK and check it against the fake backend (needs the .NET 10 SDK):
+
+```sh
+cargo run --package contr-sdkgen -- generate --lang csharp --out target/sdk/csharp
+cargo run --package contr-sdkgen -- verify --lang csharp --sdk target/sdk/csharp --daemon target/debug/contrd
 ```
 
 Contributors follow [CLAUDE.md](CLAUDE.md) and the comment convention in [docs/COMMENTS.md](docs/COMMENTS.md).
