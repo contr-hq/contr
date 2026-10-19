@@ -13,8 +13,13 @@ name = "contr"
 path = "src/main.rs"
 
 [dependencies]
+anyhow.workspace = true
 clap.workspace = true
 contr-core.workspace = true
+contr-sdk.workspace = true
+crossterm.workspace = true
+prost-types.workspace = true
+tokio = { workspace = true, features = ["io-std", "io-util", "macros", "rt-multi-thread", "signal", "time"] }
 
 [lints]
 workspace = true
