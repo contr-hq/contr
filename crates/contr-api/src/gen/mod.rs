@@ -5,6 +5,11 @@ pub mod contr {
             include!("contr.common.v1.rs");
         }
     }
+    pub mod containers {
+        pub mod v1 {
+            include!("contr.containers.v1.rs");
+        }
+    }
     pub mod daemon {
         pub mod v1 {
             include!("contr.daemon.v1.rs");
@@ -13,6 +18,21 @@ pub mod contr {
     pub mod engine {
         pub mod v1 {
             include!("contr.engine.v1.rs");
+        }
+    }
+    pub mod images {
+        pub mod v1 {
+            include!("contr.images.v1.rs");
+        }
+    }
+    pub mod networks {
+        pub mod v1 {
+            include!("contr.networks.v1.rs");
+        }
+    }
+    pub mod volumes {
+        pub mod v1 {
+            include!("contr.volumes.v1.rs");
         }
     }
 }

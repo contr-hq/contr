@@ -2,12 +2,16 @@ syntax = "proto3";
 
 package contr.daemon.v1;
 
+import "google/protobuf/timestamp.proto";
+
 option csharp_namespace = "Contr.Sdk.Daemon.V1";
 
 // Daemon identity and compatibility negotiation.
 service DaemonService {
   // Exchanges versions and capabilities; clients call it once per connection before any other RPC.
   rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
+  // Describes the daemon and, while the engine runs, the engine.
+  rpc GetInfo(GetInfoRequest) returns (GetInfoResponse);
 }
 
 message HandshakeRequest {
@@ -40,4 +44,33 @@ enum Capability {
   CAPABILITY_RESOURCE_LIMITS = 3;
   CAPABILITY_WSL_INTEGRATION = 4;
   CAPABILITY_HOST_PORT_FORWARDING = 5;
+}
+
+message GetInfoRequest {}
+
+message GetInfoResponse {
+  string daemon_version = 1;
+  uint32 api_revision = 2;
+  BackendKind backend_kind = 3;
+  uint32 pid = 4;
+  google.protobuf.Timestamp started_at = 5;
+  // Daemon host as named by Rust's std::env::consts::OS and ARCH, such as "linux" and "x86_64".
+  string os = 6;
+  string arch = 7;
+  // Absent while the engine is not running.
+  EngineInfo engine = 8;
+}
+
+// Identity of the running container engine.
+message EngineInfo {
+  // Docker Engine API address in DOCKER_HOST syntax, such as unix:///var/run/docker.sock.
+  string endpoint = 1;
+  // Docker CLI context that targets this engine; empty when the daemon created none.
+  string docker_context = 2;
+  string version = 3;
+  string api_version = 4;
+  string os = 5;
+  string arch = 6;
+  string kernel_version = 7;
+  bool rootless = 8;
 }

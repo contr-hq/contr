@@ -1,0 +1,296 @@
+syntax = "proto3";
+
+package contr.containers.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Contr.Sdk.Containers.V1";
+
+// Containers of the running engine. Container arguments accept an ID, a unique ID prefix or a name; every RPC fails
+// with ENGINE_NOT_RUNNING while the engine is not running.
+service ContainersService {
+  // Returns every container, stopped ones included.
+  rpc ListContainers(ListContainersRequest) returns (ListContainersResponse);
+  // Streams the container list, then every change to it.
+  rpc WatchContainers(WatchContainersRequest) returns (stream WatchContainersResponse);
+  // Returns the engine's full description of one container.
+  rpc InspectContainer(InspectContainerRequest) returns (InspectContainerResponse);
+  // Starts a created or stopped container; starting a running container succeeds.
+  rpc StartContainer(StartContainerRequest) returns (StartContainerResponse);
+  // Sends the container's stop signal and kills it when the timeout expires.
+  rpc StopContainer(StopContainerRequest) returns (StopContainerResponse);
+  // Stops the container, then starts it.
+  rpc RestartContainer(RestartContainerRequest) returns (RestartContainerResponse);
+  // Deletes a container; a running container needs force.
+  rpc RemoveContainer(RemoveContainerRequest) returns (RemoveContainerResponse);
+  // Streams a container's log output.
+  rpc StreamLogs(StreamLogsRequest) returns (stream StreamLogsResponse);
+  // Streams resource usage samples computed the way `docker stats` computes them.
+  rpc StreamStats(StreamStatsRequest) returns (stream StreamStatsResponse);
+  // Runs a command in a running container and relays its input and output.
+  rpc Exec(stream ExecRequest) returns (stream ExecResponse);
+}
+
+// Container as the engine lists it.
+message Container {
+  string id = 1;
+  // Names without the leading slash the engine reports.
+  repeated string names = 2;
+  // Image reference as given when the container was created.
+  string image = 3;
+  string image_id = 4;
+  string command = 5;
+  google.protobuf.Timestamp created_at = 6;
+  ContainerState state = 7;
+  // Engine-provided description such as "Up 5 minutes"; in watch streams it can be 30 seconds old.
+  string status = 8;
+  repeated PortMapping ports = 9;
+  map<string, string> labels = 10;
+}
+
+enum ContainerState {
+  CONTAINER_STATE_UNSPECIFIED = 0;
+  CONTAINER_STATE_CREATED = 1;
+  CONTAINER_STATE_RUNNING = 2;
+  CONTAINER_STATE_PAUSED = 3;
+  CONTAINER_STATE_RESTARTING = 4;
+  CONTAINER_STATE_REMOVING = 5;
+  CONTAINER_STATE_EXITED = 6;
+  CONTAINER_STATE_DEAD = 7;
+  CONTAINER_STATE_STOPPING = 8;
+}
+
+// Exposed container port and, when published, its host binding.
+message PortMapping {
+  uint32 container_port = 1;
+  // Zero when the port is exposed but not published.
+  uint32 host_port = 2;
+  string host_ip = 3;
+  Protocol protocol = 4;
+}
+
+enum Protocol {
+  PROTOCOL_UNSPECIFIED = 0;
+  PROTOCOL_TCP = 1;
+  PROTOCOL_UDP = 2;
+  PROTOCOL_SCTP = 3;
+}
+
+message ListContainersRequest {}
+
+message ListContainersResponse {
+  repeated Container containers = 1;
+}
+
+message WatchContainersRequest {}
+
+message WatchContainersResponse {
+  oneof event {
+    // Sent first and again after the daemon resynchronizes; replaces every container the client holds.
+    ContainerSnapshot snapshot = 1;
+    Container upserted = 2;
+    string removed_id = 3;
+  }
+}
+
+// Every container at one point in time.
+message ContainerSnapshot {
+  repeated Container containers = 1;
+}
+
+message InspectContainerRequest {
+  string id = 1;
+}
+
+message InspectContainerResponse {
+  Container container = 1;
+  ContainerDetails details = 2;
+  // Body of the engine's GET /containers/{id}/json response.
+  string raw_json = 3;
+}
+
+// Container fields that only inspection returns.
+message ContainerDetails {
+  // Absent when the container never started.
+  google.protobuf.Timestamp started_at = 1;
+  // Absent when the container never exited.
+  google.protobuf.Timestamp finished_at = 2;
+  int32 exit_code = 3;
+  uint32 restart_count = 4;
+  bool tty = 5;
+  HealthStatus health = 6;
+  string working_dir = 7;
+  // VAR=value entries.
+  repeated string env = 8;
+  repeated Mount mounts = 9;
+}
+
+enum HealthStatus {
+  HEALTH_STATUS_UNSPECIFIED = 0;
+  // The image defines no health check.
+  HEALTH_STATUS_NONE = 1;
+  HEALTH_STATUS_STARTING = 2;
+  HEALTH_STATUS_HEALTHY = 3;
+  HEALTH_STATUS_UNHEALTHY = 4;
+}
+
+// Filesystem mounted into a container.
+message Mount {
+  MountKind kind = 1;
+  // Volume name; empty for other kinds.
+  string name = 2;
+  string source = 3;
+  string destination = 4;
+  bool read_only = 5;
+}
+
+enum MountKind {
+  MOUNT_KIND_UNSPECIFIED = 0;
+  MOUNT_KIND_BIND = 1;
+  MOUNT_KIND_VOLUME = 2;
+  MOUNT_KIND_TMPFS = 3;
+  MOUNT_KIND_NPIPE = 4;
+  MOUNT_KIND_CLUSTER = 5;
+  MOUNT_KIND_IMAGE = 6;
+}
+
+message StartContainerRequest {
+  string id = 1;
+}
+
+message StartContainerResponse {}
+
+message StopContainerRequest {
+  string id = 1;
+  // Seconds to wait before killing; absent uses the container's own stop timeout.
+  optional int32 timeout_seconds = 2;
+}
+
+message StopContainerResponse {}
+
+message RestartContainerRequest {
+  string id = 1;
+  // Seconds to wait before killing; absent uses the container's own stop timeout.
+  optional int32 timeout_seconds = 2;
+}
+
+message RestartContainerResponse {}
+
+message RemoveContainerRequest {
+  string id = 1;
+  // Kills a running container first.
+  bool force = 2;
+  // Also removes the container's anonymous volumes.
+  bool remove_volumes = 3;
+}
+
+message RemoveContainerResponse {}
+
+message StreamLogsRequest {
+  string id = 1;
+  // Keeps the stream open for new output until the container stops.
+  bool follow = 2;
+  // Lines to send from the end of the existing log; absent sends the whole log.
+  optional uint32 tail_lines = 3;
+  // Sends only output written at or after this time.
+  google.protobuf.Timestamp since = 4;
+  // Sets StreamLogsResponse.timestamp.
+  bool timestamps = 5;
+}
+
+message StreamLogsResponse {
+  LogStream stream = 1;
+  // Output bytes; a chunk may hold part of a line or several lines.
+  bytes data = 2;
+  // Time the engine recorded the output; set only when the request asked for timestamps.
+  google.protobuf.Timestamp timestamp = 3;
+}
+
+enum LogStream {
+  LOG_STREAM_UNSPECIFIED = 0;
+  // Also carries all output of containers that run with a terminal.
+  LOG_STREAM_STDOUT = 1;
+  LOG_STREAM_STDERR = 2;
+}
+
+message StreamStatsRequest {
+  string id = 1;
+  // Sends one sample, with CPU usage measured over about one second, and ends the stream.
+  bool one_sample = 2;
+}
+
+message StreamStatsResponse {
+  ContainerStats stats = 1;
+}
+
+// One resource usage sample; the engine sends about one per second.
+message ContainerStats {
+  google.protobuf.Timestamp read_at = 1;
+  // 100.0 per fully used CPU core.
+  double cpu_percent = 2;
+  // Usage without inactive page cache, as `docker stats` reports it.
+  uint64 memory_usage_bytes = 3;
+  uint64 memory_limit_bytes = 4;
+  // memory_usage_bytes as a percentage of memory_limit_bytes.
+  double memory_percent = 5;
+  uint64 network_rx_bytes = 6;
+  uint64 network_tx_bytes = 7;
+  uint64 block_read_bytes = 8;
+  uint64 block_write_bytes = 9;
+  uint64 pids = 10;
+}
+
+message ExecRequest {
+  oneof input {
+    // Required as the first message and accepted only there.
+    ExecStart start = 1;
+    bytes stdin = 2;
+    TerminalSize resize = 3;
+    // Signals end of input; later stdin messages are dropped.
+    ExecCloseStdin close_stdin = 4;
+  }
+}
+
+// Command an Exec call runs.
+message ExecStart {
+  string container_id = 1;
+  repeated string command = 2;
+  // Allocates a pseudo-terminal; its combined output arrives as stdout.
+  bool tty = 3;
+  // Forwards stdin messages to the command.
+  bool attach_stdin = 4;
+  // VAR=value entries added to the container's environment.
+  repeated string env = 5;
+  string user = 6;
+  string working_dir = 7;
+  // Ignored without tty.
+  TerminalSize terminal_size = 8;
+  bool privileged = 9;
+}
+
+// Pseudo-terminal size in character cells.
+message TerminalSize {
+  uint32 rows = 1;
+  uint32 columns = 2;
+}
+
+message ExecCloseStdin {}
+
+message ExecResponse {
+  oneof output {
+    // First message of the stream.
+    ExecStarted started = 1;
+    bytes stdout = 2;
+    bytes stderr = 3;
+    // Last message of the stream.
+    ExecExited exited = 4;
+  }
+}
+
+message ExecStarted {
+  string exec_id = 1;
+}
+
+message ExecExited {
+  int32 exit_code = 1;
+}

@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package contr.volumes.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Contr.Sdk.Volumes.V1";
+
+// Volumes of the running engine; every RPC fails with ENGINE_NOT_RUNNING while the engine is not running.
+service VolumesService {
+  // Returns every volume.
+  rpc ListVolumes(ListVolumesRequest) returns (ListVolumesResponse);
+  // Streams the volume list, then every change to it.
+  rpc WatchVolumes(WatchVolumesRequest) returns (stream WatchVolumesResponse);
+  // Returns the engine's full description of one volume.
+  rpc InspectVolume(InspectVolumeRequest) returns (InspectVolumeResponse);
+  // Creates a volume; creating an existing volume with the same driver returns it unchanged.
+  rpc CreateVolume(CreateVolumeRequest) returns (CreateVolumeResponse);
+  // Deletes a volume no container uses.
+  rpc RemoveVolume(RemoveVolumeRequest) returns (RemoveVolumeResponse);
+  // Deletes volumes no container uses.
+  rpc PruneVolumes(PruneVolumesRequest) returns (PruneVolumesResponse);
+}
+
+// Named storage the engine mounts into containers.
+message Volume {
+  string name = 1;
+  string driver = 2;
+  // Path on the engine host.
+  string mountpoint = 3;
+  google.protobuf.Timestamp created_at = 4;
+  map<string, string> labels = 5;
+  map<string, string> options = 6;
+  VolumeScope scope = 7;
+}
+
+enum VolumeScope {
+  VOLUME_SCOPE_UNSPECIFIED = 0;
+  VOLUME_SCOPE_LOCAL = 1;
+  VOLUME_SCOPE_GLOBAL = 2;
+}
+
+message ListVolumesRequest {}
+
+message ListVolumesResponse {
+  repeated Volume volumes = 1;
+}
+
+message WatchVolumesRequest {}
+
+message WatchVolumesResponse {
+  oneof event {
+    // Sent first and again after the daemon resynchronizes; replaces every volume the client holds.
+    VolumeSnapshot snapshot = 1;
+    Volume upserted = 2;
+    string removed_name = 3;
+  }
+}
+
+// Every volume at one point in time.
+message VolumeSnapshot {
+  repeated Volume volumes = 1;
+}
+
+message InspectVolumeRequest {
+  string name = 1;
+}
+
+message InspectVolumeResponse {
+  Volume volume = 1;
+  // Body of the engine's GET /volumes/{name} response.
+  string raw_json = 2;
+}
+
+message CreateVolumeRequest {
+  // Empty lets the engine generate a name.
+  string name = 1;
+  // Empty selects the engine's default driver.
+  string driver = 2;
+  map<string, string> labels = 3;
+  map<string, string> driver_options = 4;
+}
+
+message CreateVolumeResponse {
+  Volume volume = 1;
+}
+
+message RemoveVolumeRequest {
+  string name = 1;
+  // Removes the volume even when the driver reports an error.
+  bool force = 2;
+}
+
+message RemoveVolumeResponse {}
+
+message PruneVolumesRequest {
+  // Deletes named volumes too; otherwise only anonymous ones.
+  bool all = 1;
+}
+
+message PruneVolumesResponse {
+  repeated string deleted = 1;
+  uint64 reclaimed_bytes = 2;
+}

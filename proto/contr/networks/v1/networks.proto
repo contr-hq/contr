@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package contr.networks.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Contr.Sdk.Networks.V1";
+
+// Networks of the running engine. Network arguments accept an ID, a unique ID prefix or a name; every RPC fails with
+// ENGINE_NOT_RUNNING while the engine is not running.
+service NetworksService {
+  // Returns every network.
+  rpc ListNetworks(ListNetworksRequest) returns (ListNetworksResponse);
+  // Streams the network list, then every change to it.
+  rpc WatchNetworks(WatchNetworksRequest) returns (stream WatchNetworksResponse);
+  // Returns the engine's full description of one network.
+  rpc InspectNetwork(InspectNetworkRequest) returns (InspectNetworkResponse);
+  // Creates a network.
+  rpc CreateNetwork(CreateNetworkRequest) returns (CreateNetworkResponse);
+  // Deletes a network no container is connected to.
+  rpc RemoveNetwork(RemoveNetworkRequest) returns (RemoveNetworkResponse);
+  // Deletes user-defined networks no container is connected to.
+  rpc PruneNetworks(PruneNetworksRequest) returns (PruneNetworksResponse);
+}
+
+// Network containers attach to.
+message Network {
+  string id = 1;
+  string name = 2;
+  string driver = 3;
+  NetworkScope scope = 4;
+  bool internal = 5;
+  bool attachable = 6;
+  bool ipv6_enabled = 7;
+  google.protobuf.Timestamp created_at = 8;
+  map<string, string> labels = 9;
+  repeated Subnet subnets = 10;
+}
+
+enum NetworkScope {
+  NETWORK_SCOPE_UNSPECIFIED = 0;
+  NETWORK_SCOPE_LOCAL = 1;
+  NETWORK_SCOPE_GLOBAL = 2;
+  NETWORK_SCOPE_SWARM = 3;
+}
+
+// Address range of a network.
+message Subnet {
+  // CIDR notation, such as 172.18.0.0/16.
+  string cidr = 1;
+  // Empty lets the engine choose.
+  string gateway = 2;
+}
+
+message ListNetworksRequest {}
+
+message ListNetworksResponse {
+  repeated Network networks = 1;
+}
+
+message WatchNetworksRequest {}
+
+message WatchNetworksResponse {
+  oneof event {
+    // Sent first and again after the daemon resynchronizes; replaces every network the client holds.
+    NetworkSnapshot snapshot = 1;
+    Network upserted = 2;
+    string removed_id = 3;
+  }
+}
+
+// Every network at one point in time.
+message NetworkSnapshot {
+  repeated Network networks = 1;
+}
+
+message InspectNetworkRequest {
+  string id = 1;
+}
+
+message InspectNetworkResponse {
+  Network network = 1;
+  // Body of the engine's GET /networks/{id} response.
+  string raw_json = 2;
+}
+
+message CreateNetworkRequest {
+  string name = 1;
+  // Empty selects the bridge driver.
+  string driver = 2;
+  bool internal = 3;
+  bool attachable = 4;
+  bool ipv6_enabled = 5;
+  map<string, string> labels = 6;
+  // Empty lets the engine allocate a subnet.
+  repeated Subnet subnets = 7;
+}
+
+message CreateNetworkResponse {
+  Network network = 1;
+}
+
+message RemoveNetworkRequest {
+  string id = 1;
+}
+
+message RemoveNetworkResponse {}
+
+message PruneNetworksRequest {}
+
+message PruneNetworksResponse {
+  repeated string deleted = 1;
+}
