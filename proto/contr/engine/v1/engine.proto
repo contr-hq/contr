@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package contr.engine.v1;
+
+import "contr/common/v1/errors.proto";
+
+option csharp_namespace = "Contr.Sdk.Engine.V1";
+
+// Lifecycle of the container engine the daemon manages.
+service EngineService {
+  // Streams engine state changes, starting with the current state.
+  rpc WatchState(WatchStateRequest) returns (stream WatchStateResponse);
+}
+
+message WatchStateRequest {}
+
+message WatchStateResponse {
+  EngineState state = 1;
+  // Set only when state is ENGINE_STATE_FAILED.
+  contr.common.v1.ErrorReason failure_reason = 2;
+}
+
+enum EngineState {
+  ENGINE_STATE_UNSPECIFIED = 0;
+  ENGINE_STATE_UNINITIALIZED = 1;
+  ENGINE_STATE_PROVISIONING = 2;
+  ENGINE_STATE_STOPPED = 3;
+  ENGINE_STATE_STARTING = 4;
+  ENGINE_STATE_RUNNING = 5;
+  ENGINE_STATE_STOPPING = 6;
+  ENGINE_STATE_UPDATING = 7;
+  ENGINE_STATE_RESETTING = 8;
+  ENGINE_STATE_FAILED = 9;
+}

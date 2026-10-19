@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package contr.common.v1;
+
+option csharp_namespace = "Contr.Sdk.Common.V1";
+
+// Sent in google.rpc.ErrorInfo.reason as the value name without the ERROR_REASON_ prefix.
+// Clients branch on these names, so renaming or renumbering a value breaks deployed clients.
+enum ErrorReason {
+  ERROR_REASON_UNSPECIFIED = 0;
+  ERROR_REASON_ENGINE_NOT_RUNNING = 1;
+  ERROR_REASON_WSL_NOT_INSTALLED = 2;
+  ERROR_REASON_VIRTUALIZATION_DISABLED = 3;
+  ERROR_REASON_SOCKET_PERMISSION_DENIED = 4;
+  ERROR_REASON_SETTING_LOCKED = 5;
+  ERROR_REASON_FEATURE_UNAVAILABLE = 6;
+}
+
+// Action the daemon can run to resolve a failed precondition; attached to google.rpc.Status details.
+message Remediation {
+  string action_id = 1;
+  // The action shows an operating-system elevation prompt.
+  bool requires_elevation = 2;
+}

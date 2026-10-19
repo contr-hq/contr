@@ -1,0 +1,12 @@
+[package]
+name = "contr-engine-proxy"
+description = "Docker Engine API proxy that rewrites host paths and enforces engine policy."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

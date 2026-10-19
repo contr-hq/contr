@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package contr.daemon.v1;
+
+option csharp_namespace = "Contr.Sdk.Daemon.V1";
+
+// Daemon identity and compatibility negotiation.
+service DaemonService {
+  // Exchanges versions and capabilities; clients call it once per connection before any other RPC.
+  rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
+}
+
+message HandshakeRequest {
+  string client_name = 1;
+  string client_version = 2;
+  // Value of proto/API_REVISION the client was generated from.
+  uint32 api_revision = 3;
+}
+
+message HandshakeResponse {
+  string daemon_version = 1;
+  uint32 api_revision = 2;
+  BackendKind backend_kind = 3;
+  // Clients hide every feature whose capability is absent.
+  repeated Capability capabilities = 4;
+}
+
+enum BackendKind {
+  BACKEND_KIND_UNSPECIFIED = 0;
+  BACKEND_KIND_HOST = 1;
+  BACKEND_KIND_WSL = 2;
+  BACKEND_KIND_QEMU = 3;
+  BACKEND_KIND_FAKE = 4;
+}
+
+enum Capability {
+  CAPABILITY_UNSPECIFIED = 0;
+  CAPABILITY_COMPOSE = 1;
+  CAPABILITY_KUBERNETES = 2;
+  CAPABILITY_RESOURCE_LIMITS = 3;
+  CAPABILITY_WSL_INTEGRATION = 4;
+  CAPABILITY_HOST_PORT_FORWARDING = 5;
+}

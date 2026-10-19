@@ -1,0 +1,21 @@
+[package]
+name = "contr-api"
+description = "gRPC contract of the Contr daemon, generated from proto/."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+client = []
+server = []
+
+[dependencies]
+prost.workspace = true
+tonic.workspace = true
+tonic-prost.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,12 @@
+[package]
+name = "contr-backend-wsl"
+description = "Backend that runs the engine in Contr's own WSL 2 distributions."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

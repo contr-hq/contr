@@ -1,0 +1,12 @@
+[package]
+name = "contr-transport"
+description = "Local IPC for the Contr API: Unix sockets with peer-credential checks and per-user Windows named pipes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

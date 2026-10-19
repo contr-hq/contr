@@ -1,0 +1,20 @@
+[package]
+name = "contr-daemon"
+description = "The Contr daemon, which manages the container engine and serves the Contr gRPC API."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "contrd"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+contr-core.workspace = true
+
+[lints]
+workspace = true

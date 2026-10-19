@@ -1,0 +1,52 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "Apache-2.0"
+repository = "https://github.com/contr-hq/contr"
+publish = false
+
+[workspace.dependencies]
+contr-backend = { path = "crates/contr-backend" }
+contr-core = { path = "crates/contr-core" }
+contr-sdkgen = { path = "crates/contr-sdkgen" }
+
+anyhow = "1.0.104"
+async-trait = "0.1.92"
+clap = { version = "4.6.7", features = ["derive"] }
+prost = "0.14.4"
+prost-types = "0.14.4"
+protox = "0.10.0"
+thiserror = "2.0.21"
+tonic = { version = "0.14.6", default-features = false, features = ["codegen"] }
+tonic-prost = "0.14.6"
+tonic-prost-build = "0.14.6"
+
+[workspace.lints.rust]
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+unsafe_code = "deny"
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+dbg_macro = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+undocumented_unsafe_blocks = "warn"
+unimplemented = "warn"
+unwrap_used = "warn"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"

@@ -1,0 +1,2 @@
+* text=auto eol=lf
+crates/contr-api/src/gen/** linguist-generated=true

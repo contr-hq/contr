@@ -1,0 +1,24 @@
+[package]
+name = "contr-sdkgen"
+description = "Generates Contr SDKs from the proto contract."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "contr-sdkgen"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+prost-types.workspace = true
+protox.workspace = true
+thiserror.workspace = true
+tonic-prost-build.workspace = true
+
+[lints]
+workspace = true

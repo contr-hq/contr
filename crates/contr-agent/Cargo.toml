@@ -1,0 +1,20 @@
+[package]
+name = "contr-agent"
+description = "Guest agent that supervises the engine inside the Contr WSL distribution or virtual machine."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "contr-agent"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+contr-core.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "deny": [
+      "mcp__rea",
+      "Read(~/.rea/**)",
+      "Read(~/.docker/desktop/**)",
+      "Read(//opt/docker-desktop/**)",
+      "Read(//usr/share/docker-desktop/**)"
+    ]
+  }
+}

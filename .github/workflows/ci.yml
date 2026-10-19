@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    uses: contr-hq/.github/.github/workflows/rust-ci.yml@main
+    with:
+      runners: '["ubuntu-latest", "windows-latest"]'
+
+  comments:
+    uses: contr-hq/.github/.github/workflows/comment-lint.yml@main
+
+  codegen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo xtask codegen
+      - name: Generated code matches proto/
+        run: git diff --exit-code -- crates/contr-api/src/gen
+
+  proto:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: bufbuild/buf-action@v1
+        with:
+          lint: true
+          format: true
+          breaking: ${{ github.event_name == 'pull_request' }}
+          push: false
+          archive: false
+          pr_comment: false
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2
