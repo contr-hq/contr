@@ -8,5 +8,28 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[dependencies]
+contr-api = { workspace = true, features = ["client"] }
+contr-core.workspace = true
+contr-transport.workspace = true
+futures-util.workspace = true
+prost.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["process", "sync", "time"] }
+tokio-stream.workspace = true
+tonic.workspace = true
+tonic-types.workspace = true
+tracing.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus.workspace = true
+
+[dev-dependencies]
+bytes.workspace = true
+contr-daemon.workspace = true
+prost-types.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+
 [lints]
 workspace = true
