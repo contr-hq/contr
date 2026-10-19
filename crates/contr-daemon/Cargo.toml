@@ -8,13 +8,44 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[lib]
+name = "contr_daemon"
+path = "src/lib.rs"
+
 [[bin]]
 name = "contrd"
 path = "src/main.rs"
 
+[features]
+default = ["fake"]
+fake = ["contr-backend/fake", "dep:contr-testkit"]
+
 [dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+bytes.workspace = true
 clap.workspace = true
+contr-api = { workspace = true, features = ["server"] }
+contr-backend.workspace = true
 contr-core.workspace = true
+contr-engine.workspace = true
+contr-platform.workspace = true
+contr-testkit = { workspace = true, optional = true }
+contr-transport.workspace = true
+futures-util.workspace = true
+prost.workspace = true
+prost-types.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-stream.workspace = true
+tonic = { workspace = true, features = ["router", "transport"] }
+tonic-types.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+contr-backend-host.workspace = true
+sd-notify.workspace = true
 
 [lints]
 workspace = true
