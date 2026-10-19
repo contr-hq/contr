@@ -21,6 +21,51 @@ pub struct HandshakeResponse {
     #[prost(enumeration = "Capability", repeated, tag = "4")]
     pub capabilities: ::prost::alloc::vec::Vec<i32>,
 }
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetInfoRequest {}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetInfoResponse {
+    #[prost(string, tag = "1")]
+    pub daemon_version: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "2")]
+    pub api_revision: u32,
+    #[prost(enumeration = "BackendKind", tag = "3")]
+    pub backend_kind: i32,
+    #[prost(uint32, tag = "4")]
+    pub pid: u32,
+    #[prost(message, optional, tag = "5")]
+    pub started_at: ::core::option::Option<::prost_types::Timestamp>,
+    /// Daemon host as named by Rust's std::env::consts::OS and ARCH, such as "linux" and "x86_64".
+    #[prost(string, tag = "6")]
+    pub os: ::prost::alloc::string::String,
+    #[prost(string, tag = "7")]
+    pub arch: ::prost::alloc::string::String,
+    /// Absent while the engine is not running.
+    #[prost(message, optional, tag = "8")]
+    pub engine: ::core::option::Option<EngineInfo>,
+}
+/// Identity of the running container engine.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct EngineInfo {
+    /// Docker Engine API address in DOCKER_HOST syntax, such as unix:///var/run/docker.sock.
+    #[prost(string, tag = "1")]
+    pub endpoint: ::prost::alloc::string::String,
+    /// Docker CLI context that targets this engine; empty when the daemon created none.
+    #[prost(string, tag = "2")]
+    pub docker_context: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub version: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub api_version: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub os: ::prost::alloc::string::String,
+    #[prost(string, tag = "6")]
+    pub arch: ::prost::alloc::string::String,
+    #[prost(string, tag = "7")]
+    pub kernel_version: ::prost::alloc::string::String,
+    #[prost(bool, tag = "8")]
+    pub rootless: bool,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum BackendKind {
@@ -201,6 +246,31 @@ pub mod daemon_service_client {
                 .insert(GrpcMethod::new("contr.daemon.v1.DaemonService", "Handshake"));
             self.inner.unary(req, path, codec).await
         }
+        /// Describes the daemon and, while the engine runs, the engine.
+        pub async fn get_info(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetInfoRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetInfoResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.daemon.v1.DaemonService/GetInfo",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("contr.daemon.v1.DaemonService", "GetInfo"));
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -225,6 +295,11 @@ pub mod daemon_service_server {
             tonic::Response<super::HandshakeResponse>,
             tonic::Status,
         >;
+        /// Describes the daemon and, while the engine runs, the engine.
+        async fn get_info(
+            &self,
+            request: tonic::Request<super::GetInfoRequest>,
+        ) -> std::result::Result<tonic::Response<super::GetInfoResponse>, tonic::Status>;
     }
     /// Daemon identity and compatibility negotiation.
     #[derive(Debug)]
@@ -333,6 +408,51 @@ pub mod daemon_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = HandshakeSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.daemon.v1.DaemonService/GetInfo" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetInfoSvc<T: DaemonService>(pub Arc<T>);
+                    impl<
+                        T: DaemonService,
+                    > tonic::server::UnaryService<super::GetInfoRequest>
+                    for GetInfoSvc<T> {
+                        type Response = super::GetInfoResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetInfoRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as DaemonService>::get_info(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetInfoSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

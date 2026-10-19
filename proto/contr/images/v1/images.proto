@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+package contr.images.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Contr.Sdk.Images.V1";
+
+// Images in the running engine's local store; every RPC fails with ENGINE_NOT_RUNNING while the engine is not running.
+service ImagesService {
+  // Returns every top-level image; intermediate build layers are omitted.
+  rpc ListImages(ListImagesRequest) returns (ListImagesResponse);
+  // Streams the image list, then every change to it.
+  rpc WatchImages(WatchImagesRequest) returns (stream WatchImagesResponse);
+  // Pulls an image and streams per-layer progress; cancelling the call cancels the pull.
+  rpc PullImage(PullImageRequest) returns (stream PullImageResponse);
+  // Removes one reference to an image and deletes the image once nothing references it.
+  rpc RemoveImage(RemoveImageRequest) returns (RemoveImageResponse);
+  // Deletes images no container uses.
+  rpc PruneImages(PruneImagesRequest) returns (PruneImagesResponse);
+}
+
+// Image in the local store.
+message Image {
+  string id = 1;
+  repeated string repo_tags = 2;
+  repeated string repo_digests = 3;
+  google.protobuf.Timestamp created_at = 4;
+  uint64 size_bytes = 5;
+  map<string, string> labels = 6;
+  // Containers created from the image; -1 when the engine did not count them.
+  int64 containers = 7;
+}
+
+message ListImagesRequest {}
+
+message ListImagesResponse {
+  repeated Image images = 1;
+}
+
+message WatchImagesRequest {}
+
+message WatchImagesResponse {
+  oneof event {
+    // Sent first and again after the daemon resynchronizes; replaces every image the client holds.
+    ImageSnapshot snapshot = 1;
+    Image upserted = 2;
+    string removed_id = 3;
+  }
+}
+
+// Every image at one point in time.
+message ImageSnapshot {
+  repeated Image images = 1;
+}
+
+message PullImageRequest {
+  // Image reference; one without tag or digest pulls the latest tag.
+  string reference = 1;
+  // os/arch[/variant] such as linux/arm64; empty selects the engine's own platform.
+  string platform = 2;
+}
+
+message PullImageResponse {
+  oneof event {
+    LayerProgress layer = 1;
+    // Engine status line not tied to a layer, such as the resolved digest.
+    string status = 2;
+    // Last message of the stream.
+    PulledImage pulled = 3;
+  }
+}
+
+// Download or extraction progress of one image layer.
+message LayerProgress {
+  string layer_id = 1;
+  // Engine-provided step such as "Downloading" or "Pull complete".
+  string status = 2;
+  uint64 current_bytes = 3;
+  // Zero while unknown.
+  uint64 total_bytes = 4;
+}
+
+// Image a completed pull stored.
+message PulledImage {
+  string reference = 1;
+  string image_id = 2;
+}
+
+message RemoveImageRequest {
+  // Image ID, tag or digest reference.
+  string reference = 1;
+  // Removes the image even when containers use it or other tags reference it.
+  bool force = 2;
+  // Keeps untagged parent images.
+  bool keep_parents = 3;
+}
+
+message RemoveImageResponse {
+  repeated string untagged = 1;
+  repeated string deleted = 2;
+}
+
+message PruneImagesRequest {
+  // Deletes every image without a container; otherwise only untagged images.
+  bool all = 1;
+}
+
+message PruneImagesResponse {
+  repeated string deleted = 1;
+  uint64 reclaimed_bytes = 2;
+}

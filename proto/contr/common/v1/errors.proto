@@ -14,6 +14,7 @@ enum ErrorReason {
   ERROR_REASON_SOCKET_PERMISSION_DENIED = 4;
   ERROR_REASON_SETTING_LOCKED = 5;
   ERROR_REASON_FEATURE_UNAVAILABLE = 6;
+  ERROR_REASON_ENGINE_NOT_INSTALLED = 7;
 }
 
 // Action the daemon can run to resolve a failed precondition; attached to google.rpc.Status details.

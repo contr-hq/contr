@@ -11,20 +11,53 @@ repository = "https://github.com/contr-hq/contr"
 publish = false
 
 [workspace.dependencies]
+contr-api = { path = "crates/contr-api" }
 contr-backend = { path = "crates/contr-backend" }
+contr-backend-host = { path = "crates/contr-backend-host" }
 contr-core = { path = "crates/contr-core" }
+contr-daemon = { path = "crates/contr-daemon" }
+contr-engine = { path = "crates/contr-engine" }
+contr-platform = { path = "crates/contr-platform" }
+contr-sdk = { path = "crates/contr-sdk" }
 contr-sdkgen = { path = "crates/contr-sdkgen" }
+contr-testkit = { path = "crates/contr-testkit" }
+contr-transport = { path = "crates/contr-transport" }
 
 anyhow = "1.0.104"
+async-stream = "0.3.6"
 async-trait = "0.1.92"
+bollard = { version = "0.21.1", default-features = false, features = ["pipe"] }
+bytes = "1.12.1"
 clap = { version = "4.6.7", features = ["derive"] }
+crossterm = { version = "0.29.0", default-features = false, features = ["windows"] }
+futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
+http = "1.5.0"
+http-body-util = "0.1.5"
+hyper = { version = "1.12.0", features = ["http1", "server"] }
+hyper-util = { version = "0.1.21", features = ["tokio"] }
+listenfd = "1.0.2"
+nix = { version = "0.31.3", default-features = false, features = ["user"] }
 prost = "0.14.4"
 prost-types = "0.14.4"
 protox = "0.10.0"
+sd-notify = "0.5.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+tempfile = "3.27.0"
 thiserror = "2.0.21"
+tokio = "1.54.0"
+tokio-stream = { version = "0.1.19", features = ["sync"] }
+tokio-util = "0.7.20"
 tonic = { version = "0.14.6", default-features = false, features = ["codegen"] }
 tonic-prost = "0.14.6"
 tonic-prost-build = "0.14.6"
+tonic-types = "0.14.6"
+tower = { version = "0.5.3", default-features = false, features = ["util"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+windows-sys = "0.61.2"
+zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }

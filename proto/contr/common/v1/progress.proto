@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package contr.common.v1;
+
+option csharp_namespace = "Contr.Sdk.Common.V1";
+
+// Step of a long-running operation.
+message Progress {
+  // User-facing description of the current step.
+  string message = 1;
+  // Completed share in 0.0 to 1.0; absent while indeterminate.
+  optional float fraction = 2;
+}

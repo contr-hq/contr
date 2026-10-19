@@ -20,6 +20,7 @@ pub enum ErrorReason {
     SocketPermissionDenied = 4,
     SettingLocked = 5,
     FeatureUnavailable = 6,
+    EngineNotInstalled = 7,
 }
 impl ErrorReason {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -35,6 +36,7 @@ impl ErrorReason {
             Self::SocketPermissionDenied => "ERROR_REASON_SOCKET_PERMISSION_DENIED",
             Self::SettingLocked => "ERROR_REASON_SETTING_LOCKED",
             Self::FeatureUnavailable => "ERROR_REASON_FEATURE_UNAVAILABLE",
+            Self::EngineNotInstalled => "ERROR_REASON_ENGINE_NOT_INSTALLED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -47,7 +49,18 @@ impl ErrorReason {
             "ERROR_REASON_SOCKET_PERMISSION_DENIED" => Some(Self::SocketPermissionDenied),
             "ERROR_REASON_SETTING_LOCKED" => Some(Self::SettingLocked),
             "ERROR_REASON_FEATURE_UNAVAILABLE" => Some(Self::FeatureUnavailable),
+            "ERROR_REASON_ENGINE_NOT_INSTALLED" => Some(Self::EngineNotInstalled),
             _ => None,
         }
     }
+}
+/// Step of a long-running operation.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Progress {
+    /// User-facing description of the current step.
+    #[prost(string, tag = "1")]
+    pub message: ::prost::alloc::string::String,
+    /// Completed share in 0.0 to 1.0; absent while indeterminate.
+    #[prost(float, optional, tag = "2")]
+    pub fraction: ::core::option::Option<f32>,
 }

@@ -3,6 +3,7 @@ syntax = "proto3";
 package contr.engine.v1;
 
 import "contr/common/v1/errors.proto";
+import "contr/common/v1/progress.proto";
 
 option csharp_namespace = "Contr.Sdk.Engine.V1";
 
@@ -10,6 +11,12 @@ option csharp_namespace = "Contr.Sdk.Engine.V1";
 service EngineService {
   // Streams engine state changes, starting with the current state.
   rpc WatchState(WatchStateRequest) returns (stream WatchStateResponse);
+  // Provisions the engine when needed and starts it; cancelling the call does not cancel the operation.
+  rpc Start(StartRequest) returns (stream StartResponse);
+  // Stops the engine and its containers; cancelling the call does not cancel the operation.
+  rpc Stop(StopRequest) returns (stream StopResponse);
+  // Stops and starts the engine; cancelling the call does not cancel the operation.
+  rpc Restart(RestartRequest) returns (stream RestartResponse);
 }
 
 message WatchStateRequest {}
@@ -31,4 +38,34 @@ enum EngineState {
   ENGINE_STATE_UPDATING = 7;
   ENGINE_STATE_RESETTING = 8;
   ENGINE_STATE_FAILED = 9;
+}
+
+message StartRequest {}
+
+message StartResponse {
+  oneof event {
+    contr.common.v1.Progress progress = 1;
+    // Last message of the stream.
+    EngineState state = 2;
+  }
+}
+
+message StopRequest {}
+
+message StopResponse {
+  oneof event {
+    contr.common.v1.Progress progress = 1;
+    // Last message of the stream.
+    EngineState state = 2;
+  }
+}
+
+message RestartRequest {}
+
+message RestartResponse {
+  oneof event {
+    contr.common.v1.Progress progress = 1;
+    // Last message of the stream.
+    EngineState state = 2;
+  }
 }

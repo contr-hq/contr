@@ -9,6 +9,60 @@ pub struct WatchStateResponse {
     #[prost(enumeration = "super::super::common::v1::ErrorReason", tag = "2")]
     pub failure_reason: i32,
 }
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct StartRequest {}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct StartResponse {
+    #[prost(oneof = "start_response::Event", tags = "1, 2")]
+    pub event: ::core::option::Option<start_response::Event>,
+}
+/// Nested message and enum types in `StartResponse`.
+pub mod start_response {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Event {
+        #[prost(message, tag = "1")]
+        Progress(super::super::super::common::v1::Progress),
+        /// Last message of the stream.
+        #[prost(enumeration = "super::EngineState", tag = "2")]
+        State(i32),
+    }
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct StopRequest {}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct StopResponse {
+    #[prost(oneof = "stop_response::Event", tags = "1, 2")]
+    pub event: ::core::option::Option<stop_response::Event>,
+}
+/// Nested message and enum types in `StopResponse`.
+pub mod stop_response {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Event {
+        #[prost(message, tag = "1")]
+        Progress(super::super::super::common::v1::Progress),
+        /// Last message of the stream.
+        #[prost(enumeration = "super::EngineState", tag = "2")]
+        State(i32),
+    }
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RestartRequest {}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RestartResponse {
+    #[prost(oneof = "restart_response::Event", tags = "1, 2")]
+    pub event: ::core::option::Option<restart_response::Event>,
+}
+/// Nested message and enum types in `RestartResponse`.
+pub mod restart_response {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Event {
+        #[prost(message, tag = "1")]
+        Progress(super::super::super::common::v1::Progress),
+        /// Last message of the stream.
+        #[prost(enumeration = "super::EngineState", tag = "2")]
+        State(i32),
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum EngineState {
@@ -166,6 +220,81 @@ pub mod engine_service_client {
                 .insert(GrpcMethod::new("contr.engine.v1.EngineService", "WatchState"));
             self.inner.server_streaming(req, path, codec).await
         }
+        /// Provisions the engine when needed and starts it; cancelling the call does not cancel the operation.
+        pub async fn start(
+            &mut self,
+            request: impl tonic::IntoRequest<super::StartRequest>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::StartResponse>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.engine.v1.EngineService/Start",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("contr.engine.v1.EngineService", "Start"));
+            self.inner.server_streaming(req, path, codec).await
+        }
+        /// Stops the engine and its containers; cancelling the call does not cancel the operation.
+        pub async fn stop(
+            &mut self,
+            request: impl tonic::IntoRequest<super::StopRequest>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::StopResponse>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.engine.v1.EngineService/Stop",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("contr.engine.v1.EngineService", "Stop"));
+            self.inner.server_streaming(req, path, codec).await
+        }
+        /// Stops and starts the engine; cancelling the call does not cancel the operation.
+        pub async fn restart(
+            &mut self,
+            request: impl tonic::IntoRequest<super::RestartRequest>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::RestartResponse>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.engine.v1.EngineService/Restart",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("contr.engine.v1.EngineService", "Restart"));
+            self.inner.server_streaming(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -193,6 +322,39 @@ pub mod engine_service_server {
             &self,
             request: tonic::Request<super::WatchStateRequest>,
         ) -> std::result::Result<tonic::Response<Self::WatchStateStream>, tonic::Status>;
+        /// Server streaming response type for the Start method.
+        type StartStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::StartResponse, tonic::Status>,
+            >
+            + std::marker::Send
+            + 'static;
+        /// Provisions the engine when needed and starts it; cancelling the call does not cancel the operation.
+        async fn start(
+            &self,
+            request: tonic::Request<super::StartRequest>,
+        ) -> std::result::Result<tonic::Response<Self::StartStream>, tonic::Status>;
+        /// Server streaming response type for the Stop method.
+        type StopStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::StopResponse, tonic::Status>,
+            >
+            + std::marker::Send
+            + 'static;
+        /// Stops the engine and its containers; cancelling the call does not cancel the operation.
+        async fn stop(
+            &self,
+            request: tonic::Request<super::StopRequest>,
+        ) -> std::result::Result<tonic::Response<Self::StopStream>, tonic::Status>;
+        /// Server streaming response type for the Restart method.
+        type RestartStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::RestartResponse, tonic::Status>,
+            >
+            + std::marker::Send
+            + 'static;
+        /// Stops and starts the engine; cancelling the call does not cancel the operation.
+        async fn restart(
+            &self,
+            request: tonic::Request<super::RestartRequest>,
+        ) -> std::result::Result<tonic::Response<Self::RestartStream>, tonic::Status>;
     }
     /// Lifecycle of the container engine the daemon manages.
     #[derive(Debug)]
@@ -302,6 +464,144 @@ pub mod engine_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = WatchStateSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.server_streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.engine.v1.EngineService/Start" => {
+                    #[allow(non_camel_case_types)]
+                    struct StartSvc<T: EngineService>(pub Arc<T>);
+                    impl<
+                        T: EngineService,
+                    > tonic::server::ServerStreamingService<super::StartRequest>
+                    for StartSvc<T> {
+                        type Response = super::StartResponse;
+                        type ResponseStream = T::StartStream;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::ResponseStream>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::StartRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as EngineService>::start(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = StartSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.server_streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.engine.v1.EngineService/Stop" => {
+                    #[allow(non_camel_case_types)]
+                    struct StopSvc<T: EngineService>(pub Arc<T>);
+                    impl<
+                        T: EngineService,
+                    > tonic::server::ServerStreamingService<super::StopRequest>
+                    for StopSvc<T> {
+                        type Response = super::StopResponse;
+                        type ResponseStream = T::StopStream;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::ResponseStream>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::StopRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as EngineService>::stop(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = StopSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.server_streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.engine.v1.EngineService/Restart" => {
+                    #[allow(non_camel_case_types)]
+                    struct RestartSvc<T: EngineService>(pub Arc<T>);
+                    impl<
+                        T: EngineService,
+                    > tonic::server::ServerStreamingService<super::RestartRequest>
+                    for RestartSvc<T> {
+                        type Response = super::RestartResponse;
+                        type ResponseStream = T::RestartStream;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::ResponseStream>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::RestartRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as EngineService>::restart(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = RestartSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
