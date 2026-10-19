@@ -9,6 +9,14 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use contr_core::{ErrorReason, Remediation};
 
+#[cfg(feature = "fake")]
+mod fake;
+mod supervisor;
+
+#[cfg(feature = "fake")]
+pub use fake::FakeBackend;
+pub use supervisor::{EngineHealth, EngineStatus, EngineSupervisor, OperationError, OperationEvent, SupervisorConfig};
+
 /// Platform runtime that hosts the engine.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BackendKind {
@@ -87,6 +95,16 @@ pub struct Blocker {
     pub remediations: Vec<Remediation>,
 }
 
+impl Blocker {
+    /// Blocker that no action of the daemon resolves.
+    pub fn new(reason: ErrorReason) -> Self {
+        Self {
+            reason,
+            remediations: Vec::new(),
+        }
+    }
+}
+
 /// Result of checking a backend's prerequisites.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Probe {
@@ -142,7 +160,10 @@ pub trait Backend: Send + Sync + 'static {
     /// Performs first-time setup; calling it again on a provisioned backend does nothing.
     async fn provision(&self, progress: &dyn ProgressSink) -> Result<(), BackendError>;
 
-    /// Starts the engine and returns where its Docker API listens.
+    /// Returns where the engine's Docker API listens when the engine already runs; never starts it.
+    async fn running(&self) -> Result<Option<EngineConnector>, BackendError>;
+
+    /// Starts the engine and returns where its Docker API listens; starting a running engine returns at once.
     async fn start(&self, progress: &dyn ProgressSink) -> Result<EngineConnector, BackendError>;
 
     /// Stops the engine and every running container.
