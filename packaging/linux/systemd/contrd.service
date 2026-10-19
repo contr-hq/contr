@@ -1,0 +1,13 @@
+[Unit]
+Description=Contr daemon
+Requires=contrd.socket
+After=contrd.socket
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/contrd
+Restart=on-failure
+
+[Install]
+Also=contrd.socket
+WantedBy=default.target

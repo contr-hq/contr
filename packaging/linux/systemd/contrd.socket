@@ -1,0 +1,10 @@
+[Unit]
+Description=Contr daemon API socket
+
+[Socket]
+ListenStream=%t/contr/contrd.sock
+SocketMode=0600
+DirectoryMode=0700
+
+[Install]
+WantedBy=sockets.target
