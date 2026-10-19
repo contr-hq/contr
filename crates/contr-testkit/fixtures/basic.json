@@ -1,0 +1,187 @@
+{
+  "containers": [
+    {
+      "Id": "c0ffee0100000000000000000000000000000000000000000000000000000000",
+      "Names": [
+        "/shop-web-1"
+      ],
+      "Image": "nginx:1.29",
+      "ImageID": "sha256:5e1a000000000000000000000000000000000000000000000000000000000000",
+      "Command": "/docker-entrypoint.sh nginx -g 'daemon off;'",
+      "Created": 1760000000,
+      "Ports": [
+        {
+          "IP": "0.0.0.0",
+          "PrivatePort": 80,
+          "PublicPort": 8080,
+          "Type": "tcp"
+        }
+      ],
+      "Labels": {
+        "com.docker.compose.project": "shop",
+        "com.docker.compose.service": "web"
+      },
+      "State": "running",
+      "Status": "Up 2 hours"
+    },
+    {
+      "Id": "c0ffee0200000000000000000000000000000000000000000000000000000000",
+      "Names": [
+        "/shop-db-1"
+      ],
+      "Image": "postgres:18",
+      "ImageID": "sha256:9b2c000000000000000000000000000000000000000000000000000000000000",
+      "Command": "docker-entrypoint.sh postgres",
+      "Created": 1760000000,
+      "Ports": [
+        {
+          "PrivatePort": 5432,
+          "Type": "tcp"
+        }
+      ],
+      "Labels": {
+        "com.docker.compose.project": "shop",
+        "com.docker.compose.service": "db"
+      },
+      "State": "running",
+      "Status": "Up 2 hours (healthy)",
+      "Mounts": [
+        {
+          "Type": "volume",
+          "Name": "shop_pgdata",
+          "Source": "/var/lib/docker/volumes/shop_pgdata/_data",
+          "Destination": "/var/lib/postgresql",
+          "Driver": "local",
+          "Mode": "z",
+          "RW": true,
+          "Propagation": ""
+        }
+      ]
+    },
+    {
+      "Id": "c0ffee0300000000000000000000000000000000000000000000000000000000",
+      "Names": [
+        "/migrate"
+      ],
+      "Image": "alpine:3.22",
+      "ImageID": "sha256:a1b3000000000000000000000000000000000000000000000000000000000000",
+      "Command": "sh -c 'echo done'",
+      "Created": 1759996400,
+      "Ports": [],
+      "Labels": {},
+      "State": "exited",
+      "Status": "Exited (0) 2 hours ago"
+    }
+  ],
+  "images": [
+    {
+      "Id": "sha256:5e1a000000000000000000000000000000000000000000000000000000000000",
+      "ParentId": "",
+      "RepoTags": [
+        "nginx:1.29"
+      ],
+      "RepoDigests": [
+        "nginx@sha256:d100000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "Created": 1759913600,
+      "Size": 192000000,
+      "SharedSize": -1,
+      "Labels": {},
+      "Containers": -1
+    },
+    {
+      "Id": "sha256:9b2c000000000000000000000000000000000000000000000000000000000000",
+      "ParentId": "",
+      "RepoTags": [
+        "postgres:18"
+      ],
+      "RepoDigests": [
+        "postgres@sha256:d200000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "Created": 1759913600,
+      "Size": 456000000,
+      "SharedSize": -1,
+      "Labels": {},
+      "Containers": -1
+    },
+    {
+      "Id": "sha256:a1b3000000000000000000000000000000000000000000000000000000000000",
+      "ParentId": "",
+      "RepoTags": [
+        "alpine:3.22"
+      ],
+      "RepoDigests": [
+        "alpine@sha256:d300000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "Created": 1759827200,
+      "Size": 8400000,
+      "SharedSize": -1,
+      "Labels": {},
+      "Containers": -1
+    }
+  ],
+  "volumes": [
+    {
+      "Name": "shop_pgdata",
+      "Driver": "local",
+      "Mountpoint": "/var/lib/docker/volumes/shop_pgdata/_data",
+      "CreatedAt": "2025-10-09T08:53:20Z",
+      "Labels": {
+        "com.docker.compose.project": "shop"
+      },
+      "Scope": "local",
+      "Options": {}
+    }
+  ],
+  "networks": [
+    {
+      "Name": "bridge",
+      "Id": "e700000000000000000000000000000000000000000000000000000000000000",
+      "Created": "2025-10-09T08:00:00Z",
+      "Scope": "local",
+      "Driver": "bridge",
+      "EnableIPv4": true,
+      "EnableIPv6": false,
+      "Internal": false,
+      "Attachable": false,
+      "Ingress": false,
+      "IPAM": {
+        "Driver": "default",
+        "Config": [
+          {
+            "Subnet": "172.17.0.0/16",
+            "Gateway": "172.17.0.1"
+          }
+        ]
+      },
+      "Options": {},
+      "Labels": {}
+    },
+    {
+      "Name": "shop_default",
+      "Id": "e800000000000000000000000000000000000000000000000000000000000000",
+      "Created": "2025-10-09T08:53:19Z",
+      "Scope": "local",
+      "Driver": "bridge",
+      "EnableIPv4": true,
+      "EnableIPv6": false,
+      "Internal": false,
+      "Attachable": false,
+      "Ingress": false,
+      "IPAM": {
+        "Driver": "default",
+        "Config": [
+          {
+            "Subnet": "172.18.0.0/16",
+            "Gateway": "172.18.0.1"
+          }
+        ]
+      },
+      "Options": {},
+      "Labels": {
+        "com.docker.compose.network": "default",
+        "com.docker.compose.project": "shop"
+      }
+    }
+  ]
+}
