@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 
 use prost_types::FileDescriptorSet;
 
+pub mod csharp;
 pub mod rust;
+pub mod verify;
 
 pub const REVISION_FILE: &str = "API_REVISION";
 
@@ -28,12 +30,27 @@ pub enum Error {
         #[source]
         source: io::Error,
     },
+    #[error("cannot run {program}")]
+    Spawn {
+        program: String,
+        #[source]
+        source: io::Error,
+    },
+    #[error("the daemon did not listen on {0} in time")]
+    DaemonStart(String),
+    #[error("{program} failed with {status}")]
+    Failed {
+        program: String,
+        status: std::process::ExitStatus,
+    },
 }
 
 /// Compiled proto contract plus the API revision it declares.
 pub struct Contract {
     descriptors: FileDescriptorSet,
     revision: u32,
+    root: PathBuf,
+    files: Vec<PathBuf>,
 }
 
 impl Contract {
@@ -43,11 +60,25 @@ impl Contract {
         let descriptors = protox::compile(&files, [proto_root]).map_err(Box::new)?;
         let revision = read_revision(&proto_root.join(REVISION_FILE))?;
 
-        Ok(Self { descriptors, revision })
+        Ok(Self {
+            descriptors,
+            revision,
+            root: proto_root.to_path_buf(),
+            files,
+        })
     }
 
     pub fn revision(&self) -> u32 {
         self.revision
+    }
+
+    /// Proto files relative to the proto root, sorted.
+    pub fn files(&self) -> &[PathBuf] {
+        &self.files
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
     }
 }
 

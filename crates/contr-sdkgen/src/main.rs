@@ -25,24 +25,62 @@ enum Command {
         /// Directory that receives the generated sources.
         #[arg(long)]
         out: PathBuf,
+        /// Template tree of the C# SDK.
+        #[arg(long, default_value = "sdk/csharp")]
+        template: PathBuf,
+        /// Package version; every artifact of a release shares it.
+        #[arg(long, default_value = env!("CARGO_PKG_VERSION"))]
+        version: String,
+    },
+    /// Run a generated SDK's conformance program against `contrd --backend fake`.
+    Verify {
+        /// SDK language; only C# has a conformance program.
+        #[arg(long, value_enum)]
+        lang: VerifiedLang,
+        /// Output directory of `generate`.
+        #[arg(long)]
+        sdk: PathBuf,
+        /// Path of the `contrd` executable.
+        #[arg(long)]
+        daemon: PathBuf,
+        /// Fixture file for the fake backend instead of its built-in set.
+        #[arg(long)]
+        fixtures: Option<PathBuf>,
     },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
 enum Lang {
     Rust,
+    Csharp,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum VerifiedLang {
+    Csharp,
 }
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::Generate {
-            lang: Lang::Rust,
+            lang,
             proto,
             out,
+            template,
+            version,
         } => {
             let contract = Contract::load(&proto)?;
-            contr_sdkgen::rust::generate(&contract, &out)?;
+            match lang {
+                Lang::Rust => contr_sdkgen::rust::generate(&contract, &out)?,
+                Lang::Csharp => contr_sdkgen::csharp::generate(&contract, &template, &out, &version)?,
+            }
         }
+        Command::Verify {
+            lang: VerifiedLang::Csharp,
+            sdk,
+            daemon,
+            fixtures,
+        } => contr_sdkgen::verify::csharp(&sdk, &daemon, fixtures.as_deref())?,
     }
 
     Ok(())

@@ -2,3 +2,5 @@
 *.profraw
 .idea/
 .DS_Store
+sdk/**/bin/
+sdk/**/obj/

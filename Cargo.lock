@@ -497,8 +497,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "contr-core",
  "prost-types",
  "protox",
+ "tempfile",
  "thiserror",
  "tonic-prost-build",
 ]
