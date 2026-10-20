@@ -16,6 +16,15 @@ pub fn runtime_dir() -> Option<PathBuf> {
     base.filter(|dir| dir.is_absolute())
 }
 
+/// Directory holding the WSL distributions' virtual disks: `%LOCALAPPDATA%\Contr\wsl`; `None` when that variable
+/// is unset.
+#[cfg(windows)]
+pub fn wsl_dir() -> Option<PathBuf> {
+    env::var_os("LOCALAPPDATA")
+        .map(|dir| PathBuf::from(dir).join(product::DISPLAY_NAME).join("wsl"))
+        .filter(|dir| dir.is_absolute())
+}
+
 /// Default path of the daemon's gRPC socket.
 #[cfg(unix)]
 pub fn api_socket() -> Option<PathBuf> {
