@@ -25,6 +25,15 @@ pub fn wsl_dir() -> Option<PathBuf> {
         .filter(|dir| dir.is_absolute())
 }
 
+/// Directory holding the Docker CLI tools installed for the user: `%LOCALAPPDATA%\Contr\cli`; `None` when that
+/// variable is unset.
+#[cfg(windows)]
+pub fn cli_dir() -> Option<PathBuf> {
+    env::var_os("LOCALAPPDATA")
+        .map(|dir| PathBuf::from(dir).join(product::DISPLAY_NAME).join("cli"))
+        .filter(|dir| dir.is_absolute())
+}
+
 /// Default path of the daemon's gRPC socket.
 #[cfg(unix)]
 pub fn api_socket() -> Option<PathBuf> {
