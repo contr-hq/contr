@@ -1,0 +1,22 @@
+[package]
+name = "contr-mux"
+description = "Stream multiplexing between contrd and the guest agent over one byte stream."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "rt", "sync"] }
+tokio-util = { workspace = true, features = ["compat"] }
+tracing.workspace = true
+yamux.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-util", "macros", "rt-multi-thread", "sync", "time"] }
+
+[lints]
+workspace = true

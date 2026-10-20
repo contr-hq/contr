@@ -14,9 +14,11 @@ publish = false
 contr-api = { path = "crates/contr-api" }
 contr-backend = { path = "crates/contr-backend" }
 contr-backend-host = { path = "crates/contr-backend-host" }
+contr-backend-wsl = { path = "crates/contr-backend-wsl" }
 contr-core = { path = "crates/contr-core" }
 contr-daemon = { path = "crates/contr-daemon" }
 contr-engine = { path = "crates/contr-engine" }
+contr-mux = { path = "crates/contr-mux" }
 contr-platform = { path = "crates/contr-platform" }
 contr-sdk = { path = "crates/contr-sdk" }
 contr-sdkgen = { path = "crates/contr-sdkgen" }
@@ -57,6 +59,7 @@ tower = { version = "0.5.3", default-features = false, features = ["util"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 windows-sys = "0.61.2"
+yamux = "0.14.1"
 zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
 
 [workspace.lints.rust]
