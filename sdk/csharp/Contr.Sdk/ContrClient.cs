@@ -4,6 +4,7 @@ using Contr.Sdk.Containers.V1;
 using Contr.Sdk.Daemon.V1;
 using Contr.Sdk.Engine.V1;
 using Contr.Sdk.Images.V1;
+using Contr.Sdk.Integration.V1;
 using Contr.Sdk.Networks.V1;
 using Contr.Sdk.Volumes.V1;
 using Grpc.Core;
@@ -30,6 +31,7 @@ public sealed class ContrClient : IDisposable
         Images = new ImagesService.ImagesServiceClient(channel);
         Volumes = new VolumesService.VolumesServiceClient(channel);
         Networks = new NetworksService.NetworksServiceClient(channel);
+        Integration = new IntegrationService.IntegrationServiceClient(channel);
     }
 
     /// <summary>Value of <c>proto/API_REVISION</c> this SDK was generated from.</summary>
@@ -58,6 +60,9 @@ public sealed class ContrClient : IDisposable
 
     /// <summary>Networks service.</summary>
     public NetworksService.NetworksServiceClient Networks { get; }
+
+    /// <summary>Integration with the user's tools: Docker CLI tools and WSL distributions.</summary>
+    public IntegrationService.IntegrationServiceClient Integration { get; }
 
     /// <summary>Connects to <paramref name="endpoint"/>, or to <see cref="ContrEndpoint.Resolve"/>, and performs the handshake.</summary>
     public static async Task<ContrClient> ConnectAsync(
