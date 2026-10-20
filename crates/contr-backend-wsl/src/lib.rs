@@ -9,6 +9,7 @@
 
 #[cfg(windows)]
 mod backend;
+mod host_tcp;
 mod images;
 mod ping;
 #[cfg(windows)]

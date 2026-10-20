@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use contr_core::guest;
 use contr_engine_proxy::Rewrites;
-use contr_mux::{Channel, Opener};
+use contr_mux::{Channel, Opener, Role};
 use contr_transport::{Endpoint, Listener};
 use futures_util::StreamExt;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
@@ -12,7 +12,7 @@ use tokio::process::{Child, ChildStdout};
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{Instant, sleep, timeout};
 
-use crate::{ping, wsl};
+use crate::{host_tcp, ping, wsl};
 
 const ANCHOR_WAIT: Duration = Duration::from_secs(60);
 const ENGINE_WAIT: Duration = Duration::from_secs(120);
@@ -46,7 +46,7 @@ impl Session {
         let (Some(stdout), Some(stdin)) = (agent.stdout.take(), agent.stdin.take()) else {
             return Err(io::Error::other("the agent has no standard streams"));
         };
-        let (opener, driver) = contr_mux::connect(tokio::io::join(stdout, stdin));
+        let (opener, driver) = contr_mux::session(tokio::io::join(stdout, stdin), Role::Host, host_tcp::serve);
         background.push(tokio::spawn(async move {
             if let Err(error) = driver.await {
                 tracing::warn!(%error, "the guest session failed");

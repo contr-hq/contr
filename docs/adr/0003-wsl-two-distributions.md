@@ -26,3 +26,6 @@ resets.
 - Measured in the nested Windows sandbox: `wsl.exe` standard streams carry about 49 MiB/s, and the relay delivers
   11–17 MiB/s of container output. Large transfers (`docker load`, big build contexts) are the case for Hyper-V
   sockets.
+- `host.docker.internal` resolves to a reserved guest address; the agent redirects that traffic and `contrd` opens
+  the connection on the Windows loopback interface. Containers therefore reach the user's local services without a
+  firewall rule, with the user's network identity, as Docker clients expect.
