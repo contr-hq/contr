@@ -1,6 +1,6 @@
-//! Docker Engine API proxy between Windows clients and an engine in a Linux guest. Container definitions get guest
-//! paths for Windows bind sources and a `host.docker.internal` alias; every other request, upgrades included, passes
-//! through unchanged.
+//! Docker Engine API proxy between clients outside a Linux guest and the engine inside it. Container definitions get
+//! guest paths for their bind sources and a `host.docker.internal` alias; every other request, upgrades included,
+//! passes through unchanged.
 
 #![warn(missing_docs)]
 

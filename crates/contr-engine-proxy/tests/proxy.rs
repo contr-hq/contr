@@ -59,6 +59,7 @@ async fn connected_client() -> hyper::client::conn::http1::SendRequest<Full<Byte
     };
     let rewrites = Arc::new(Rewrites {
         drives_root: "/mnt".to_owned(),
+        distro_root: None,
         host_alias: true,
     });
     tokio::spawn(contr_engine_proxy::serve(proxy, connect, rewrites));

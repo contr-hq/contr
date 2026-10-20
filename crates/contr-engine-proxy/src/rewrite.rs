@@ -4,11 +4,20 @@ use serde_json::{Map, Value};
 const HOST_ALIAS: &str = "host.docker.internal";
 const HOST_ALIAS_ENTRY: &str = "host.docker.internal:host-gateway";
 
-/// How container definitions from Windows clients are adjusted for an engine in a Linux guest.
+/// Directory under which WSL mounts the Windows drives and its shared `wsl` directory in every distribution.
+const SHARED_MOUNTS: &str = "/mnt";
+/// Sources that name the engine socket, which means the same in the client's distribution and in the guest.
+const ENGINE_SOCKETS: [&str; 2] = ["/var/run/docker.sock", "/run/docker.sock"];
+
+/// How container definitions from clients outside the engine's Linux guest are adjusted for it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Rewrites {
     /// Guest directory holding one mount per Windows drive, such as `/mnt` for `/mnt/c`.
     pub drives_root: String,
+    /// Guest mount of the root file system of the WSL distribution the client runs in. Absolute Linux sources
+    /// move under it unless they lie in `/mnt` or name the engine socket; submounts of that distribution are not
+    /// visible there. `None` for Windows clients.
+    pub distro_root: Option<String>,
     /// Maps `host.docker.internal` to the engine's host gateway in containers that do not name it themselves.
     pub host_alias: bool,
 }
@@ -40,8 +49,8 @@ pub(crate) fn container_create(body: &[u8], rewrites: &Rewrites) -> Option<Vec<u
         .or_insert_with(|| Value::Object(Map::new()))
         .as_object_mut()?;
 
-    let mut changed = rewrite_binds(host_config, &rewrites.drives_root);
-    changed |= rewrite_mounts(host_config, &rewrites.drives_root);
+    let mut changed = rewrite_binds(host_config, rewrites);
+    changed |= rewrite_mounts(host_config, rewrites);
     if rewrites.host_alias {
         changed |= add_host_alias(host_config);
     }
@@ -49,13 +58,13 @@ pub(crate) fn container_create(body: &[u8], rewrites: &Rewrites) -> Option<Vec<u
     changed.then(|| serde_json::to_vec(&definition).ok()).flatten()
 }
 
-fn rewrite_binds(host_config: &mut Map<String, Value>, drives_root: &str) -> bool {
+fn rewrite_binds(host_config: &mut Map<String, Value>, rewrites: &Rewrites) -> bool {
     let Some(Value::Array(binds)) = host_config.get_mut("Binds") else {
         return false;
     };
     let mut changed = false;
     for bind in binds {
-        if let Some(converted) = bind.as_str().and_then(|bind| windows_bind(bind, drives_root)) {
+        if let Some(converted) = bind.as_str().and_then(|bind| guest_bind(bind, rewrites)) {
             *bind = Value::String(converted);
             changed = true;
         }
@@ -64,7 +73,7 @@ fn rewrite_binds(host_config: &mut Map<String, Value>, drives_root: &str) -> boo
     changed
 }
 
-fn rewrite_mounts(host_config: &mut Map<String, Value>, drives_root: &str) -> bool {
+fn rewrite_mounts(host_config: &mut Map<String, Value>, rewrites: &Rewrites) -> bool {
     let Some(Value::Array(mounts)) = host_config.get_mut("Mounts") else {
         return false;
     };
@@ -76,7 +85,7 @@ fn rewrite_mounts(host_config: &mut Map<String, Value>, drives_root: &str) -> bo
         let converted = mount
             .get("Source")
             .and_then(Value::as_str)
-            .and_then(|source| windows_path(source, drives_root));
+            .and_then(|source| guest_path(source, rewrites));
         if let Some(converted) = converted {
             mount.insert("Source".to_owned(), Value::String(converted));
             changed = true;
@@ -120,6 +129,11 @@ fn add_host_alias(host_config: &mut Map<String, Value>) -> bool {
     true
 }
 
+/// Guest path of a bind source, or `None` when the guest reads it as written.
+fn guest_path(source: &str, rewrites: &Rewrites) -> Option<String> {
+    windows_path(source, &rewrites.drives_root).or_else(|| distro_path(source, rewrites.distro_root.as_deref()?))
+}
+
 /// Guest path of a Windows absolute path such as `C:\src` or `c:/src`.
 fn windows_path(path: &str, drives_root: &str) -> Option<String> {
     let mut chars = path.chars();
@@ -140,10 +154,30 @@ fn windows_path(path: &str, drives_root: &str) -> Option<String> {
     ))
 }
 
-/// Guest form of a `-v` bind such as `C:\src:/w:ro`; the source ends at the first colon after the drive letter.
-fn windows_bind(bind: &str, drives_root: &str) -> Option<String> {
-    let source_end = bind.get(2..)?.find(':')? + 2;
-    let source = windows_path(&bind[..source_end], drives_root)?;
+/// Guest path of an absolute path in the client's distribution.
+fn distro_path(path: &str, distro_root: &str) -> Option<String> {
+    let shared = path == SHARED_MOUNTS
+        || path
+            .strip_prefix(SHARED_MOUNTS)
+            .is_some_and(|rest| rest.starts_with('/'))
+        || ENGINE_SOCKETS.contains(&path);
+    if !path.starts_with('/') || shared {
+        return None;
+    }
+
+    Some(format!("{}{path}", distro_root.trim_end_matches('/')))
+}
+
+/// Guest form of a `-v` bind such as `C:\src:/w:ro` or `/src:/w`; a Windows source ends at the first colon after
+/// its drive letter.
+fn guest_bind(bind: &str, rewrites: &Rewrites) -> Option<String> {
+    let drive_letter = bind.get(1..2) == Some(":");
+    let source_end = if drive_letter {
+        bind.get(2..)?.find(':')? + 2
+    } else {
+        bind.find(':')?
+    };
+    let source = guest_path(&bind[..source_end], rewrites)?;
 
     Some(format!("{source}{}", &bind[source_end..]))
 }
@@ -157,7 +191,15 @@ mod tests {
     fn rewrites(host_alias: bool) -> Rewrites {
         Rewrites {
             drives_root: "/mnt".to_owned(),
+            distro_root: None,
             host_alias,
+        }
+    }
+
+    fn distro_rewrites() -> Rewrites {
+        Rewrites {
+            distro_root: Some("/mnt/wsl/contr/distros/Ubuntu".to_owned()),
+            ..rewrites(false)
         }
     }
 
@@ -190,14 +232,36 @@ mod tests {
 
     #[test]
     fn converts_binds_and_keeps_options() {
-        assert_eq!(windows_bind(r"C:\src:/w", "/mnt").as_deref(), Some("/mnt/c/src:/w"));
+        let windows = rewrites(false);
+
+        assert_eq!(guest_bind(r"C:\src:/w", &windows).as_deref(), Some("/mnt/c/src:/w"));
         assert_eq!(
-            windows_bind(r"C:\My Files:/w:ro", "/mnt").as_deref(),
+            guest_bind(r"C:\My Files:/w:ro", &windows).as_deref(),
             Some("/mnt/c/My Files:/w:ro")
         );
-        assert_eq!(windows_bind("named:/data", "/mnt"), None);
-        assert_eq!(windows_bind("/mnt/c/src:/w", "/mnt"), None);
-        assert_eq!(windows_bind(r"C:\src", "/mnt"), None);
+        assert_eq!(guest_bind("named:/data", &windows), None);
+        assert_eq!(guest_bind("/mnt/c/src:/w", &windows), None);
+        assert_eq!(guest_bind("/home/dev/src:/w", &windows), None);
+        assert_eq!(guest_bind(r"C:\src", &windows), None);
+    }
+
+    #[test]
+    fn moves_distribution_paths_under_its_root() {
+        let distro = distro_rewrites();
+
+        assert_eq!(
+            guest_bind("/home/dev/src:/w:ro", &distro).as_deref(),
+            Some("/mnt/wsl/contr/distros/Ubuntu/home/dev/src:/w:ro")
+        );
+        assert_eq!(guest_bind("/mnt/c/src:/w", &distro), None);
+        assert_eq!(guest_bind("/mnt/wsl/shared:/w", &distro), None);
+        assert_eq!(guest_bind("/var/run/docker.sock:/var/run/docker.sock", &distro), None);
+        assert_eq!(guest_bind("named:/data", &distro), None);
+        assert_eq!(
+            guest_path("/mntx", &distro).as_deref(),
+            Some("/mnt/wsl/contr/distros/Ubuntu/mntx")
+        );
+        assert_eq!(guest_path(r"D:\data", &distro).as_deref(), Some("/mnt/d/data"));
     }
 
     #[test]
