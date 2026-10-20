@@ -6,6 +6,7 @@ use contr_api::containers::v1::containers_service_client::ContainersServiceClien
 use contr_api::containers::v1::{Container, ExecStart, ListContainersRequest};
 use contr_api::daemon::v1::daemon_service_client::DaemonServiceClient;
 use contr_api::daemon::v1::{GetInfoRequest, GetInfoResponse, HandshakeRequest, HandshakeResponse};
+use contr_api::diagnostics::v1::diagnostics_service_client::DiagnosticsServiceClient;
 use contr_api::engine::v1::engine_service_client::EngineServiceClient;
 use contr_api::engine::v1::{WatchStateRequest, WatchStateResponse};
 use contr_api::images::v1::images_service_client::ImagesServiceClient;
@@ -114,6 +115,11 @@ impl Client {
     /// Integration with the user's own tools.
     pub fn integration(&self) -> IntegrationServiceClient<Channel> {
         IntegrationServiceClient::new(self.channel.clone())
+    }
+
+    /// Checks of what keeps the engine from working, and the fixes the daemon runs.
+    pub fn diagnostics(&self) -> DiagnosticsServiceClient<Channel> {
+        DiagnosticsServiceClient::new(self.channel.clone())
     }
 
     /// Volumes service.

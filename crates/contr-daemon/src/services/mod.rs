@@ -2,28 +2,31 @@
 
 mod containers;
 mod daemon;
+mod diagnostics;
 mod engine;
 mod images;
 mod integration;
 mod networks;
 mod volumes;
 
+use std::sync::Arc;
 use std::time::SystemTime;
 
-use contr_backend::{BackendKind, Capability, EngineSupervisor};
+use contr_backend::{Backend, BackendKind, Capability, EngineSupervisor};
 use futures_util::stream::{self, BoxStream};
 use futures_util::{Stream, StreamExt};
 use tonic::Status;
 
 pub(crate) use containers::ContainersApi;
 pub(crate) use daemon::DaemonApi;
+pub(crate) use diagnostics::DiagnosticsApi;
 pub(crate) use engine::EngineApi;
 pub(crate) use images::ImagesApi;
 pub(crate) use integration::{CliLocations, IntegrationApi, WslAccess};
 pub(crate) use networks::NetworksApi;
 pub(crate) use volumes::VolumesApi;
 
-use crate::slot::EngineSlot;
+use crate::slot::{DockerContext, EngineSlot};
 use crate::status;
 
 pub(crate) type ResponseStream<T> = BoxStream<'static, Result<T, Status>>;
@@ -39,6 +42,9 @@ pub(crate) struct Shared {
     pub(crate) cli: Option<CliLocations>,
     /// Engine access from the user's WSL distributions; `None` where the engine does not run in WSL.
     pub(crate) wsl: Option<WslAccess>,
+    pub(crate) backend: Arc<dyn Backend>,
+    /// Docker CLI context the daemon keeps pointed at the engine; `None` when it manages none.
+    pub(crate) docker_context: Option<DockerContext>,
 }
 
 /// A watch stream ends only when its engine cache closes, which clients see as `ENGINE_NOT_RUNNING`.

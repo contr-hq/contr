@@ -161,7 +161,7 @@ fn wsl_distribution(distribution: WslDistribution) -> proto::WslDistribution {
     }
 }
 
-fn cli_tools(locations: &CliLocations, install: bool) -> Result<proto::CliTools, Status> {
+pub(super) fn cli_tools(locations: &CliLocations, install: bool) -> Result<proto::CliTools, Status> {
     let bundle = Bundle::load(&locations.bundle);
     if install {
         let bundle = bundle

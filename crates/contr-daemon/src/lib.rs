@@ -13,6 +13,7 @@ use std::time::SystemTime;
 use async_trait::async_trait;
 use contr_api::containers::v1::containers_service_server::ContainersServiceServer;
 use contr_api::daemon::v1::daemon_service_server::DaemonServiceServer;
+use contr_api::diagnostics::v1::diagnostics_service_server::DiagnosticsServiceServer;
 use contr_api::engine::v1::engine_service_server::EngineServiceServer;
 use contr_api::images::v1::images_service_server::ImagesServiceServer;
 use contr_api::integration::v1::integration_service_server::IntegrationServiceServer;
@@ -24,8 +25,8 @@ use contr_transport::{DiscoveryFile, Endpoint, Listener, TransportError};
 use tonic::transport::Server;
 
 use crate::services::{
-    CliLocations, ContainersApi, DaemonApi, EngineApi, ImagesApi, IntegrationApi, NetworksApi, Shared, VolumesApi,
-    WslAccess,
+    CliLocations, ContainersApi, DaemonApi, DiagnosticsApi, EngineApi, ImagesApi, IntegrationApi, NetworksApi, Shared,
+    VolumesApi, WslAccess,
 };
 use crate::slot::{DockerContext, EngineSlot};
 
@@ -94,7 +95,8 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
         ..SupervisorConfig::default()
     };
     let supervisor = EngineSupervisor::spawn(Arc::clone(&backend), Arc::new(Health), supervision).await;
-    let slot = EngineSlot::spawn(&supervisor, docker_context(&config, backend.kind()));
+    let context = docker_context(&config, backend.kind());
+    let slot = EngineSlot::spawn(&supervisor, context.clone());
     let shared = Arc::new(Shared {
         supervisor,
         slot,
@@ -103,6 +105,8 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
         started_at: SystemTime::now(),
         cli: cli_locations(config.cli_dir.clone()),
         wsl,
+        backend: Arc::clone(&backend),
+        docker_context: context,
     });
 
     let endpoint = listener.endpoint();
@@ -126,6 +130,7 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
         .add_service(ContainersServiceServer::new(ContainersApi(Arc::clone(&shared))))
         .add_service(ImagesServiceServer::new(ImagesApi(Arc::clone(&shared))))
         .add_service(IntegrationServiceServer::new(IntegrationApi(Arc::clone(&shared))))
+        .add_service(DiagnosticsServiceServer::new(DiagnosticsApi(Arc::clone(&shared))))
         .add_service(VolumesServiceServer::new(VolumesApi(Arc::clone(&shared))))
         .add_service(NetworksServiceServer::new(NetworksApi(shared)))
         .serve_with_incoming_shutdown(listener.incoming(), shutdown)

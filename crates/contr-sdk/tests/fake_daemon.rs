@@ -11,6 +11,7 @@ use contr_sdk::api::containers::v1::{
     UnpauseContainerRequest, WatchContainersRequest,
 };
 use contr_sdk::api::daemon::v1::{BackendKind, Capability};
+use contr_sdk::api::diagnostics::v1::{CheckStatus, RunChecksRequest, RunRemediationRequest};
 use contr_sdk::api::engine::v1::{
     EngineState, ResetRequest, ResetScope, StartRequest, StopRequest, StreamUsageRequest, reset_response,
     start_response, stop_response,
@@ -376,6 +377,47 @@ async fn usage_reports_capacity_and_ends_when_the_engine_stops() {
         }
     };
     assert!(matches!(Error::from(ended), Error::EngineNotRunning(_)));
+
+    daemon.stop().await;
+}
+
+async fn check_statuses(client: &Client) -> Vec<(String, CheckStatus)> {
+    client
+        .diagnostics()
+        .run_checks(RunChecksRequest {})
+        .await
+        .unwrap()
+        .into_inner()
+        .checks
+        .into_iter()
+        .map(|check| {
+            let status = check.status();
+            (check.id, status)
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn checks_follow_the_engine_and_unknown_fixes_are_refused() {
+    let daemon = Daemon::start();
+    let client = daemon.client().await;
+
+    let stopped = check_statuses(&client).await;
+    assert!(stopped.contains(&("prerequisites".to_owned(), CheckStatus::Pass)));
+    assert!(stopped.contains(&("engine-api".to_owned(), CheckStatus::Skip)));
+
+    start_engine(&client).await;
+    let running = check_statuses(&client).await;
+    assert!(running.contains(&("engine-api".to_owned(), CheckStatus::Pass)));
+
+    let refused = client
+        .diagnostics()
+        .run_remediation(RunRemediationRequest {
+            action_id: "install-wsl".to_owned(),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(Error::from(refused), Error::NotFound(_)));
 
     daemon.stop().await;
 }

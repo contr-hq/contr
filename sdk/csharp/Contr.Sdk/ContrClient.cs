@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Contr.Sdk.Containers.V1;
 using Contr.Sdk.Daemon.V1;
+using Contr.Sdk.Diagnostics.V1;
 using Contr.Sdk.Engine.V1;
 using Contr.Sdk.Images.V1;
 using Contr.Sdk.Integration.V1;
@@ -32,6 +33,7 @@ public sealed class ContrClient : IDisposable
         Volumes = new VolumesService.VolumesServiceClient(channel);
         Networks = new NetworksService.NetworksServiceClient(channel);
         Integration = new IntegrationService.IntegrationServiceClient(channel);
+        Diagnostics = new DiagnosticsService.DiagnosticsServiceClient(channel);
     }
 
     /// <summary>Value of <c>proto/API_REVISION</c> this SDK was generated from.</summary>
@@ -63,6 +65,9 @@ public sealed class ContrClient : IDisposable
 
     /// <summary>Integration with the user's tools: Docker CLI tools and WSL distributions.</summary>
     public IntegrationService.IntegrationServiceClient Integration { get; }
+
+    /// <summary>Checks of what keeps the engine from working, and the fixes the daemon runs.</summary>
+    public DiagnosticsService.DiagnosticsServiceClient Diagnostics { get; }
 
     /// <summary>Connects to <paramref name="endpoint"/>, or to <see cref="ContrEndpoint.Resolve"/>, and performs the handshake.</summary>
     public static async Task<ContrClient> ConnectAsync(
