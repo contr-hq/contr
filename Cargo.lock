@@ -384,6 +384,7 @@ dependencies = [
  "contr-core",
  "contr-engine-proxy",
  "contr-mux",
+ "contr-platform",
  "contr-transport",
  "futures-util",
  "serde",
@@ -511,6 +512,7 @@ dependencies = [
 name = "contr-platform"
 version = "0.1.0"
 dependencies = [
+ "nix",
  "serde_json",
  "sha2",
  "tempfile",
