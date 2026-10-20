@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package contr.diagnostics.v1;
+
+import "contr/common/v1/errors.proto";
+import "contr/common/v1/progress.proto";
+
+option csharp_namespace = "Contr.Sdk.Diagnostics.V1";
+
+// Finds what keeps the engine or its features from working and runs the fixes the daemon offers.
+service DiagnosticsService {
+  // Checks the backend's prerequisites, the engine and the user's tools; some checks take a few seconds.
+  rpc RunChecks(RunChecksRequest) returns (RunChecksResponse);
+  // Runs a remediation that a check, a blocker or an error offered; fails with NOT_FOUND for an action this backend
+  // does not offer. Cancelling the call does not cancel the action.
+  rpc RunRemediation(RunRemediationRequest) returns (stream RunRemediationResponse);
+}
+
+message RunChecksRequest {}
+
+message RunChecksResponse {
+  // In the order clients should show them.
+  repeated Check checks = 1;
+}
+
+// One diagnostic check and what it found.
+message Check {
+  // Stable identifier such as "wsl" or "engine-api"; clients may key translations on it.
+  string id = 1;
+  string title = 2;
+  CheckStatus status = 3;
+  // What the check found, in one sentence.
+  string detail = 4;
+  // Fixes the daemon can run, in the order clients should offer them.
+  repeated contr.common.v1.Remediation remediations = 5;
+}
+
+enum CheckStatus {
+  CHECK_STATUS_UNSPECIFIED = 0;
+  CHECK_STATUS_PASS = 1;
+  // Works, with a limitation the user may want to remove.
+  CHECK_STATUS_WARN = 2;
+  // Keeps the engine or a feature from working.
+  CHECK_STATUS_FAIL = 3;
+  // Not checked, because it does not apply now or an earlier check failed.
+  CHECK_STATUS_SKIP = 4;
+}
+
+message RunRemediationRequest {
+  string action_id = 1;
+}
+
+message RunRemediationResponse {
+  oneof event {
+    contr.common.v1.Progress progress = 1;
+    // Last message of the stream.
+    RemediationOutcome outcome = 2;
+  }
+}
+
+// What the user must still do after a remediation succeeded.
+message RemediationOutcome {
+  // The computer must restart before the fix takes effect.
+  bool restart_required = 1;
+  // The user must sign out and back in before the fix takes effect.
+  bool logout_required = 2;
+}

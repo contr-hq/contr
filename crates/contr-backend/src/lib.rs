@@ -173,6 +173,79 @@ pub trait Backend: Send + Sync + 'static {
 
     /// Restores the runtime to a clean state; the engine must be stopped first.
     async fn reset(&self, scope: ResetScope, progress: &dyn ProgressSink) -> Result<(), BackendError>;
+
+    /// Remediations [`Backend::remediate`] runs; every remediation a blocker or check offers is one of them.
+    fn remediations(&self) -> &'static [Remediation] {
+        &[]
+    }
+
+    /// Checks of the backend's own state beyond [`Backend::probe`], in the order clients show them.
+    async fn diagnose(&self) -> Vec<Check> {
+        Vec::new()
+    }
+
+    /// Runs `remediation`, one of [`Backend::remediations`].
+    async fn remediate(
+        &self,
+        remediation: &Remediation,
+        progress: &dyn ProgressSink,
+    ) -> Result<RemediationOutcome, BackendError> {
+        let _ = progress;
+        Err(BackendError::Io(io::Error::other(format!(
+            "this backend cannot run {}",
+            remediation.action_id
+        ))))
+    }
+}
+
+/// Result of one diagnostic check.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Check {
+    /// Stable identifier clients may key translations on.
+    pub id: &'static str,
+    /// User-facing name of what is checked.
+    pub title: &'static str,
+    /// Outcome.
+    pub status: CheckStatus,
+    /// What the check found, in one sentence.
+    pub detail: String,
+    /// Fixes the backend can run, in the order clients should offer them.
+    pub remediations: Vec<Remediation>,
+}
+
+impl Check {
+    /// Check with no remediation.
+    pub fn new(id: &'static str, title: &'static str, status: CheckStatus, detail: impl Into<String>) -> Self {
+        Self {
+            id,
+            title,
+            status,
+            detail: detail.into(),
+            remediations: Vec::new(),
+        }
+    }
+}
+
+/// Outcome of a diagnostic check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CheckStatus {
+    /// Works.
+    Pass,
+    /// Works, with a limitation the user may want to remove.
+    Warn,
+    /// Keeps the engine or a feature from working.
+    Fail,
+    /// Not checked, because it does not apply now or an earlier check failed.
+    Skip,
+}
+
+/// What the user must still do after a remediation succeeded.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RemediationOutcome {
+    /// The computer must restart before the fix takes effect.
+    pub restart_required: bool,
+    /// The user must sign out and back in before the fix takes effect.
+    pub logout_required: bool,
 }
 
 /// One of the user's own WSL distributions.
