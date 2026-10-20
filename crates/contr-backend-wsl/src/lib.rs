@@ -11,6 +11,8 @@
 mod backend;
 mod host_tcp;
 mod images;
+mod integration;
+mod output;
 mod ping;
 #[cfg(windows)]
 mod session;

@@ -52,6 +52,47 @@ pub(crate) async fn distributions() -> io::Result<Vec<String>> {
     })
 }
 
+/// A registered distribution as `wsl.exe --list --verbose` reports it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Listed {
+    pub(crate) name: String,
+    pub(crate) version: u8,
+    pub(crate) is_default: bool,
+}
+
+/// The registered distributions with their WSL version.
+pub(crate) async fn list() -> io::Result<Vec<Listed>> {
+    let output = run(["--list", "--verbose"]).await?;
+
+    Ok(if output.status.success() {
+        listed(&decode(&output.stdout))
+    } else {
+        Vec::new()
+    })
+}
+
+/// User ID that `wsl.exe` runs commands in distribution `name` as when no user is named.
+pub(crate) async fn default_uid(name: &str) -> io::Result<u32> {
+    let output = run(["--distribution", name, "--exec", "id", "-u"]).await?;
+    check(&output, &format!("find the default user of {name}"))?;
+
+    decode(&output.stdout)
+        .trim()
+        .parse()
+        .map_err(|_| io::Error::other(format!("{name} reported an invalid default user ID")))
+}
+
+/// Runs `args` as root in distribution `name` until it exits successfully.
+pub(crate) async fn exec(name: &str, args: &[&str]) -> io::Result<()> {
+    let output = wsl()
+        .args(["--distribution", name, "--user", "root", "--exec"])
+        .args(args)
+        .output()
+        .await?;
+
+    check(&output, &format!("run {} in {name}", args.join(" ")))
+}
+
 /// Registers `image` as WSL 2 distribution `name`, with its virtual disk in `install_dir`.
 pub(crate) async fn import(name: &str, install_dir: &Path, image: &Path) -> io::Result<()> {
     std::fs::create_dir_all(install_dir)?;
@@ -143,6 +184,31 @@ fn names(listing: &str) -> Vec<String> {
         .collect()
 }
 
+/// Rows of a `--list --verbose` listing: a localized header, then the name, state and version of each
+/// distribution, the default one marked with `*`.
+fn listed(listing: &str) -> Vec<Listed> {
+    listing
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let line = line.trim_matches(|c: char| c.is_whitespace() || c == '\0');
+            let (is_default, row) = match line.strip_prefix('*') {
+                Some(row) => (true, row),
+                None => (false, line),
+            };
+            let mut fields = row.split_whitespace();
+            let name = fields.next()?;
+            let version = fields.next_back()?.parse().ok()?;
+
+            Some(Listed {
+                name: name.to_owned(),
+                version,
+                is_default,
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,6 +219,30 @@ mod tests {
 
         assert_eq!(decode(b"contr\n"), "contr\n");
         assert_eq!(decode(&utf16), "contr\r\n");
+    }
+
+    #[test]
+    fn lists_distributions_with_their_version() {
+        let listing = "  NAME            STATE           VERSION\r\n\
+                       * Ubuntu-24.04    Running         2\r\n\
+                       \x20 Legacy          Stopped         1\r\n\
+                       \r\n";
+
+        assert_eq!(
+            listed(listing),
+            [
+                Listed {
+                    name: "Ubuntu-24.04".to_owned(),
+                    version: 2,
+                    is_default: true,
+                },
+                Listed {
+                    name: "Legacy".to_owned(),
+                    version: 1,
+                    is_default: false,
+                },
+            ]
+        );
     }
 
     #[test]
