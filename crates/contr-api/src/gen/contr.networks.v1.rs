@@ -123,6 +123,34 @@ pub struct PruneNetworksResponse {
     #[prost(string, repeated, tag = "1")]
     pub deleted: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CheckHostPortsRequest {
+    #[prost(message, repeated, tag = "1")]
+    pub ports: ::prost::alloc::vec::Vec<HostPort>,
+}
+/// A port of this computer.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct HostPort {
+    #[prost(uint32, tag = "1")]
+    pub port: u32,
+    /// TCP when unspecified; SCTP ports are never reported in use.
+    #[prost(enumeration = "super::super::containers::v1::Protocol", tag = "2")]
+    pub protocol: i32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CheckHostPortsResponse {
+    /// In request order.
+    #[prost(message, repeated, tag = "1")]
+    pub ports: ::prost::alloc::vec::Vec<HostPortStatus>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct HostPortStatus {
+    #[prost(message, optional, tag = "1")]
+    pub port: ::core::option::Option<HostPort>,
+    /// A program on this computer holds the port, so publishing it fails or does not answer on localhost.
+    #[prost(bool, tag = "2")]
+    pub in_use: bool,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum NetworkScope {
@@ -167,8 +195,8 @@ pub mod networks_service_client {
     )]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
-    /// Networks of the running engine. Network arguments accept an ID, a unique ID prefix or a name; every RPC fails with
-    /// ENGINE_NOT_RUNNING while the engine is not running.
+    /// Networks of the running engine and ports of this computer. Network arguments accept an ID, a unique ID prefix or a
+    /// name; every RPC except CheckHostPorts fails with ENGINE_NOT_RUNNING while the engine is not running.
     #[derive(Debug, Clone)]
     pub struct NetworksServiceClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -403,6 +431,37 @@ pub mod networks_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /// Reports which of the given ports a program on this computer already holds, so clients can warn before
+        /// publishing them.
+        pub async fn check_host_ports(
+            &mut self,
+            request: impl tonic::IntoRequest<super::CheckHostPortsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::CheckHostPortsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.networks.v1.NetworksService/CheckHostPorts",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "contr.networks.v1.NetworksService",
+                        "CheckHostPorts",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -473,9 +532,18 @@ pub mod networks_service_server {
             tonic::Response<super::PruneNetworksResponse>,
             tonic::Status,
         >;
+        /// Reports which of the given ports a program on this computer already holds, so clients can warn before
+        /// publishing them.
+        async fn check_host_ports(
+            &self,
+            request: tonic::Request<super::CheckHostPortsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::CheckHostPortsResponse>,
+            tonic::Status,
+        >;
     }
-    /// Networks of the running engine. Network arguments accept an ID, a unique ID prefix or a name; every RPC fails with
-    /// ENGINE_NOT_RUNNING while the engine is not running.
+    /// Networks of the running engine and ports of this computer. Network arguments accept an ID, a unique ID prefix or a
+    /// name; every RPC except CheckHostPorts fails with ENGINE_NOT_RUNNING while the engine is not running.
     #[derive(Debug)]
     pub struct NetworksServiceServer<T> {
         inner: Arc<T>,
@@ -813,6 +881,52 @@ pub mod networks_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = PruneNetworksSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.networks.v1.NetworksService/CheckHostPorts" => {
+                    #[allow(non_camel_case_types)]
+                    struct CheckHostPortsSvc<T: NetworksService>(pub Arc<T>);
+                    impl<
+                        T: NetworksService,
+                    > tonic::server::UnaryService<super::CheckHostPortsRequest>
+                    for CheckHostPortsSvc<T> {
+                        type Response = super::CheckHostPortsResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::CheckHostPortsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as NetworksService>::check_host_ports(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = CheckHostPortsSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

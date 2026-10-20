@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
+use contr_api::containers::v1::Protocol;
 use contr_api::networks::v1 as proto;
 use contr_api::networks::v1::networks_service_server::NetworksService;
 use contr_api::networks::v1::watch_networks_response::Event;
 use contr_engine::Change;
+use contr_platform::ports::{self, Transport};
 use tonic::{Request, Response, Status};
 
 use super::{ResponseStream, Shared, watch};
@@ -96,5 +98,37 @@ impl NetworksService for NetworksApi {
         handle.cache.refresh_networks().await;
 
         Ok(Response::new(response))
+    }
+
+    async fn check_host_ports(
+        &self,
+        request: Request<proto::CheckHostPortsRequest>,
+    ) -> Result<Response<proto::CheckHostPortsResponse>, Status> {
+        let ports = request.into_inner().ports;
+        if let Some(invalid) = ports
+            .iter()
+            .find(|port| port.port == 0 || port.port > u32::from(u16::MAX))
+        {
+            return Err(Status::invalid_argument(format!("{} is not a port", invalid.port)));
+        }
+
+        let statuses = tokio::task::spawn_blocking(move || ports.into_iter().map(host_port_status).collect())
+            .await
+            .map_err(|error| Status::internal(error.to_string()))?;
+        Ok(Response::new(proto::CheckHostPortsResponse { ports: statuses }))
+    }
+}
+
+fn host_port_status(port: proto::HostPort) -> proto::HostPortStatus {
+    let number = u16::try_from(port.port).unwrap_or_default();
+    let in_use = match port.protocol() {
+        Protocol::Unspecified | Protocol::Tcp => ports::in_use(number, Transport::Tcp),
+        Protocol::Udp => ports::in_use(number, Transport::Udp),
+        Protocol::Sctp => false,
+    };
+
+    proto::HostPortStatus {
+        port: Some(port),
+        in_use,
     }
 }
