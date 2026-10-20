@@ -84,6 +84,12 @@ impl Remediation {
         action_id: "setup-rootless",
         requires_elevation: false,
     };
+
+    /// Installs WSL 2; Windows may need a restart afterwards.
+    pub const INSTALL_WSL: Self = Self {
+        action_id: "install-wsl",
+        requires_elevation: true,
+    };
 }
 
 #[cfg(test)]

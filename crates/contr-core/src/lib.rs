@@ -3,6 +3,7 @@
 #![warn(missing_docs)]
 
 mod error;
+pub mod guest;
 pub mod paths;
 pub mod product;
 
