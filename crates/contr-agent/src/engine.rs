@@ -12,8 +12,8 @@ use tokio::net::UnixStream;
 use tokio::process::{Child, Command};
 use tokio::signal::unix::{SignalKind, signal};
 
-use crate::host;
 use crate::mounts::is_mount_point;
+use crate::{host, share};
 
 const DOCKERD: &str = "/usr/local/bin/dockerd";
 const LOG_DIR: &str = "/var/log/contr";
@@ -23,13 +23,16 @@ const STABLE_AFTER: Duration = Duration::from_secs(60);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
 /// Runs `dockerd` and relays multiplexed engine streams to its socket until the host closes the session or the agent
-/// receives SIGTERM, then stops `dockerd`.
-pub(crate) async fn serve(data_root: Option<PathBuf>) -> anyhow::Result<()> {
+/// receives SIGTERM, then stops `dockerd`. With `share`, `dockerd` also listens on the shared engine socket.
+pub(crate) async fn serve(data_root: Option<PathBuf>, share: bool) -> anyhow::Result<()> {
     let data_root = match data_root {
         Some(path) => path,
         None => default_data_root()?,
     };
-    let mut engine = Engine::start(data_root)?;
+    if share {
+        share::prepare()?;
+    }
+    let mut engine = Engine::start(data_root, share)?;
     let (opener, driver) = contr_mux::session(
         tokio::io::join(tokio::io::stdin(), tokio::io::stdout()),
         Role::Guest,
@@ -89,17 +92,19 @@ async fn relay(channel: Channel, mut stream: MuxStream) {
 
 struct Engine {
     data_root: PathBuf,
+    share: bool,
     child: Child,
     started: Instant,
     failures: u32,
 }
 
 impl Engine {
-    fn start(data_root: PathBuf) -> anyhow::Result<Self> {
-        let child = spawn_dockerd(&data_root)?;
+    fn start(data_root: PathBuf, share: bool) -> anyhow::Result<Self> {
+        let child = spawn_dockerd(&data_root, share)?;
 
         Ok(Self {
             data_root,
+            share,
             child,
             started: Instant::now(),
             failures: 0,
@@ -119,7 +124,7 @@ impl Engine {
         tracing::warn!(%status, ?delay, "dockerd exited; restarting");
 
         tokio::time::sleep(delay).await;
-        self.child = spawn_dockerd(&self.data_root)?;
+        self.child = spawn_dockerd(&self.data_root, self.share)?;
         self.started = Instant::now();
         Ok(())
     }
@@ -145,7 +150,7 @@ fn backoff(failures: u32) -> Duration {
     Duration::from_secs(1 << failures.min(5)).min(MAX_BACKOFF)
 }
 
-fn spawn_dockerd(data_root: &Path) -> anyhow::Result<Child> {
+fn spawn_dockerd(data_root: &Path, share: bool) -> anyhow::Result<Child> {
     fs::create_dir_all(data_root).with_context(|| format!("cannot create {}", data_root.display()))?;
     fs::create_dir_all(LOG_DIR).with_context(|| format!("cannot create {LOG_DIR}"))?;
     let log_path = Path::new(LOG_DIR).join("dockerd.log");
@@ -161,6 +166,11 @@ fn spawn_dockerd(data_root: &Path) -> anyhow::Result<Child> {
         .arg(data_root)
         .arg("--host")
         .arg(format!("unix://{}", guest::ENGINE_SOCKET));
+    if share {
+        command
+            .arg("--host")
+            .arg(format!("unix://{}", guest::SHARED_ENGINE_SOCKET));
+    }
     command.arg("--host-gateway-ip").arg(guest::HOST_ADDRESS.to_string());
     let child = command
         .env("PATH", SEARCH_PATH)

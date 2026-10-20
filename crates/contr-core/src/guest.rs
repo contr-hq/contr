@@ -28,6 +28,22 @@ pub const DATA_MOUNT: &str = "/mnt/wsl/contr/data";
 /// Line the data anchor writes to standard output once [`DATA_MOUNT`] is in place.
 pub const DATA_READY: &str = "contr-data ready";
 
+/// Second engine socket, in the directory every distribution of the WSL 2 virtual machine shares; the user's
+/// integrated distributions reach the engine through it. Only root may connect.
+pub const SHARED_ENGINE_SOCKET: &str = "/mnt/wsl/contr/docker.sock";
+
+/// Directory on the data guest's storage where the runtime guest publishes what integrated distributions run: the
+/// agent and the Docker CLI in `bin/`, Docker CLI plugins in `cli-plugins/`, and the release they came from in
+/// `release`.
+pub const INTEGRATION_DIR: &str = "/mnt/wsl/contr/data/integration";
+
+/// Directory where each integrated distribution mounts its root file system, at its own name, so the engine can
+/// bind paths of that distribution.
+pub const DISTROS_DIR: &str = "/mnt/wsl/contr/distros";
+
+/// Line `contr-agent integrate` writes to standard output once the distribution reaches the engine.
+pub const INTEGRATION_READY: &str = "contr integration ready";
+
 /// File next to the guest images that names them and their release, as JSON with the keys `release`, `runtime`
 /// and `data`.
 pub const MANIFEST_FILE: &str = "guest.json";
