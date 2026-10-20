@@ -1,5 +1,6 @@
 //! `contr`, the command-line interface to the Contr daemon.
 
+mod cli_tools;
 mod exec;
 mod format;
 
@@ -36,6 +37,9 @@ enum Command {
     },
     /// Run a command in a running container.
     Exec(exec::ExecArgs),
+    /// Show or install the Docker CLI tools the daemon bundles.
+    #[command(subcommand)]
+    Cli(cli_tools::CliCommand),
 }
 
 fn main() -> ExitCode {
@@ -64,6 +68,7 @@ async fn run(command: Command) -> anyhow::Result<i32> {
         Command::Stop => stop(&Client::connect_default(&identity).await?).await,
         Command::Ps { all } => ps(&Client::connect_default(&identity).await?, all).await,
         Command::Exec(args) => exec::run(&Client::connect_default(&identity).await?, args).await,
+        Command::Cli(command) => cli_tools::run(&Client::connect_or_start(&identity).await?, command).await,
     }
 }
 
