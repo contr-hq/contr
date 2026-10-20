@@ -24,6 +24,21 @@ pub fn config_dir() -> Option<PathBuf> {
         .or_else(|| std::env::home_dir().map(|home| home.join(".docker")))
 }
 
+/// The context the Docker CLI uses when neither `--context`, `DOCKER_CONTEXT` nor `DOCKER_HOST` names one.
+pub fn current(config_dir: &Path) -> io::Result<String> {
+    let config = match fs::read(config_dir.join("config.json")) {
+        Ok(bytes) => serde_json::from_slice::<Value>(&bytes).map_err(io::Error::other)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Value::Null,
+        Err(error) => return Err(error),
+    };
+
+    Ok(config["currentContext"]
+        .as_str()
+        .filter(|name| !name.is_empty())
+        .unwrap_or("default")
+        .to_owned())
+}
+
 /// Points context `name` at `host`, creating it when missing. Other endpoints, TLS material and the current-context
 /// setting are left as they are.
 pub fn ensure(config_dir: &Path, name: &str, description: &str, host: &str) -> io::Result<Outcome> {

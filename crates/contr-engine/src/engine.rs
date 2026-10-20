@@ -74,6 +74,11 @@ impl Engine {
         Ok((cpus, memory))
     }
 
+    /// Directory, on the machine the engine runs on, that holds its data.
+    pub async fn root_dir(&self) -> Result<String, EngineError> {
+        Ok(self.docker.info().await?.docker_root_dir.unwrap_or_default())
+    }
+
     /// Bytes that images, containers, volumes and the build cache take.
     pub async fn disk_usage(&self) -> Result<u64, EngineError> {
         let options = DataUsageOptions {
