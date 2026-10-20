@@ -44,6 +44,7 @@ impl Daemon {
             engine_socket: None,
             fixtures: None,
             guest_dir: None,
+            default_pipe: false,
             docker_context: false,
         };
         let (shutdown, signal) = oneshot::channel();

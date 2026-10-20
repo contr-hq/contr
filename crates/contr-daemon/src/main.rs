@@ -32,6 +32,9 @@ struct Args {
     /// Leave the Docker CLI context alone.
     #[arg(long)]
     no_docker_context: bool,
+    /// Do not serve the engine on the Docker CLI's default pipe (Windows).
+    #[arg(long)]
+    no_default_pipe: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -75,6 +78,7 @@ fn main() -> anyhow::Result<()> {
         engine_socket: args.engine_socket,
         fixtures: args.fixtures,
         guest_dir: args.guest_dir,
+        default_pipe: !args.no_default_pipe,
         docker_context: !args.no_docker_context,
     };
 

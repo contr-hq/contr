@@ -27,14 +27,19 @@ pub(crate) struct Session {
     anchor: Child,
     agent: Child,
     opener: Opener,
-    relay: JoinHandle<()>,
+    relays: Vec<JoinHandle<()>>,
     background: Vec<JoinHandle<()>>,
 }
 
 impl Session {
-    /// Anchors the data distribution, starts the agent in the runtime distribution and serves `engine_pipe`;
-    /// returns once the engine answers a ping.
-    pub(crate) async fn start(runtime: &str, data: &str, engine_pipe: &str) -> io::Result<Self> {
+    /// Anchors the data distribution, starts the agent in the runtime distribution, serves `engine_pipe` and each of
+    /// `shared_pipes` no other program owns, and returns once the engine answers a ping.
+    pub(crate) async fn start(
+        runtime: &str,
+        data: &str,
+        engine_pipe: &str,
+        shared_pipes: &[String],
+    ) -> io::Result<Self> {
         let mut background = Vec::new();
 
         let mut anchor = wsl::spawn(data, &[guest::AGENT_PATH, "data-anchor"])?;
@@ -55,13 +60,22 @@ impl Session {
 
         let listener = Listener::bind_messages(&Endpoint::NamedPipe(engine_pipe.to_owned()))
             .map_err(|error| io::Error::other(format!("cannot serve {engine_pipe}: {error}")))?;
-        let relay = relay(listener, opener.clone());
+        let mut relays = vec![relay(listener, opener.clone())];
+        for pipe in shared_pipes {
+            match Listener::bind_messages(&Endpoint::NamedPipe(pipe.clone())) {
+                Ok(listener) => {
+                    tracing::info!(%pipe, "serving the engine");
+                    relays.push(relay(listener, opener.clone()));
+                }
+                Err(error) => tracing::info!(%error, %pipe, "another program serves this pipe"),
+            }
+        }
 
         let mut session = Self {
             anchor,
             agent,
             opener,
-            relay,
+            relays,
             background,
         };
         if let Err(error) = session.wait_for_engine().await {
@@ -77,9 +91,11 @@ impl Session {
         matches!(self.agent.try_wait(), Ok(None)) && matches!(self.anchor.try_wait(), Ok(None))
     }
 
-    /// Stops serving the pipe, closes the session so the agent stops the engine, then releases the data anchor.
+    /// Stops serving the pipes, closes the session so the agent stops the engine, then releases the data anchor.
     pub(crate) async fn stop(mut self) {
-        self.relay.abort();
+        for relay in &self.relays {
+            relay.abort();
+        }
         drop(self.opener);
 
         if timeout(AGENT_STOP, self.agent.wait()).await.is_err() {

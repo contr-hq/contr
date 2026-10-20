@@ -50,6 +50,8 @@ pub struct Config {
     pub fixtures: Option<PathBuf>,
     /// Directory holding the guest images and their manifest for the WSL backend.
     pub guest_dir: Option<PathBuf>,
+    /// Also serves the engine on the Docker CLI's default pipe when no other program owns it.
+    pub default_pipe: bool,
     /// Keeps the Docker CLI context pointed at the running engine.
     pub docker_context: bool,
 }
@@ -136,7 +138,7 @@ fn backend(config: &Config) -> Result<Arc<dyn Backend>, DaemonError> {
     match config.backend {
         BackendChoice::Host => host_backend(config.engine_socket.clone()),
         #[cfg(windows)]
-        BackendChoice::Wsl => wsl_backend(config.guest_dir.clone()),
+        BackendChoice::Wsl => wsl_backend(config.guest_dir.clone(), config.default_pipe),
         #[cfg(feature = "fake")]
         BackendChoice::Fake => {
             let fixtures = match &config.fixtures {
@@ -166,7 +168,7 @@ fn host_backend(_engine_socket: Option<PathBuf>) -> Result<Arc<dyn Backend>, Dae
 }
 
 #[cfg(windows)]
-fn wsl_backend(guest_dir: Option<PathBuf>) -> Result<Arc<dyn Backend>, DaemonError> {
+fn wsl_backend(guest_dir: Option<PathBuf>, default_pipe: bool) -> Result<Arc<dyn Backend>, DaemonError> {
     let setup = |source| DaemonError::Backend { backend: "wsl", source };
     let guest_dir = match guest_dir {
         Some(dir) => dir,
@@ -177,7 +179,9 @@ fn wsl_backend(guest_dir: Option<PathBuf>) -> Result<Arc<dyn Backend>, DaemonErr
             .ok_or_else(|| setup(std::io::Error::other("contrd has no parent directory")))?,
     };
 
-    Ok(Arc::new(contr_backend_wsl::WslBackend::new(guest_dir).map_err(setup)?))
+    Ok(Arc::new(
+        contr_backend_wsl::WslBackend::new(guest_dir, default_pipe).map_err(setup)?,
+    ))
 }
 
 fn docker_context(config: &Config, kind: BackendKind) -> Option<DockerContext> {

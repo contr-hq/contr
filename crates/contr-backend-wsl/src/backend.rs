@@ -12,25 +12,36 @@ use crate::images::GuestImages;
 use crate::session::Session;
 use crate::wsl;
 
+/// Pipe the Docker CLI uses when neither a context nor `DOCKER_HOST` names another.
+const DOCKER_DEFAULT_PIPE: &str = r"\\.\pipe\docker_engine";
+
 /// Backend that runs the engine in two WSL 2 distributions: a runtime distribution replaced whenever its release
 /// differs from the bundled image, and a data distribution that keeps engine data across those replacements.
 pub struct WslBackend {
     images_dir: PathBuf,
     disks_dir: PathBuf,
     engine_pipe: String,
+    shared_pipes: Vec<String>,
     session: Mutex<Option<Session>>,
 }
 
 impl WslBackend {
-    /// Backend that installs the guest images described by the manifest in `images_dir`.
-    pub fn new(images_dir: PathBuf) -> io::Result<Self> {
+    /// Backend that installs the guest images described by the manifest in `images_dir`; with `default_pipe` it also
+    /// serves the Docker CLI's default pipe whenever no other program owns it.
+    pub fn new(images_dir: PathBuf, default_pipe: bool) -> io::Result<Self> {
         let disks_dir = paths::wsl_dir().ok_or_else(|| io::Error::other("LOCALAPPDATA is not set"))?;
         let engine_pipe = product::engine_pipe_name(&contr_transport::current_user_sid()?);
+        let shared_pipes = if default_pipe {
+            vec![DOCKER_DEFAULT_PIPE.to_owned()]
+        } else {
+            Vec::new()
+        };
 
         Ok(Self {
             images_dir,
             disks_dir,
             engine_pipe,
+            shared_pipes,
             session: Mutex::new(None),
         })
     }
@@ -120,7 +131,13 @@ impl Backend for WslBackend {
         }
 
         report(progress, "Starting the engine");
-        let session = Session::start(product::WSL_RUNTIME_DISTRO, product::WSL_DATA_DISTRO, &self.engine_pipe).await?;
+        let session = Session::start(
+            product::WSL_RUNTIME_DISTRO,
+            product::WSL_DATA_DISTRO,
+            &self.engine_pipe,
+            &self.shared_pipes,
+        )
+        .await?;
         *slot = Some(session);
 
         Ok(self.connector())
