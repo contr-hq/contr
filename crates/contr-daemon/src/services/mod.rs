@@ -19,7 +19,7 @@ pub(crate) use containers::ContainersApi;
 pub(crate) use daemon::DaemonApi;
 pub(crate) use engine::EngineApi;
 pub(crate) use images::ImagesApi;
-pub(crate) use integration::{CliLocations, IntegrationApi};
+pub(crate) use integration::{CliLocations, IntegrationApi, WslAccess};
 pub(crate) use networks::NetworksApi;
 pub(crate) use volumes::VolumesApi;
 
@@ -37,6 +37,8 @@ pub(crate) struct Shared {
     pub(crate) started_at: SystemTime,
     /// Bundled and installed Docker CLI tools; `None` where the daemon bundles none.
     pub(crate) cli: Option<CliLocations>,
+    /// Engine access from the user's WSL distributions; `None` where the engine does not run in WSL.
+    pub(crate) wsl: Option<WslAccess>,
 }
 
 /// A watch stream ends only when its engine cache closes, which clients see as `ENGINE_NOT_RUNNING`.
