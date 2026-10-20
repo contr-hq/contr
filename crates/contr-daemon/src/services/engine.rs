@@ -3,8 +3,8 @@ use std::sync::Arc;
 use contr_api::common::v1::Progress;
 use contr_api::engine::v1 as proto;
 use contr_api::engine::v1::engine_service_server::EngineService;
-use contr_api::engine::v1::{restart_response, start_response, stop_response};
-use contr_backend::{EngineState, OperationEvent};
+use contr_api::engine::v1::{reset_response, restart_response, start_response, stop_response};
+use contr_backend::{EngineState, OperationEvent, ResetScope};
 use futures_util::stream::BoxStream;
 use futures_util::{Stream, StreamExt};
 use tokio_stream::wrappers::WatchStream;
@@ -21,6 +21,7 @@ impl EngineService for EngineApi {
     type StartStream = ResponseStream<proto::StartResponse>;
     type StopStream = ResponseStream<proto::StopResponse>;
     type RestartStream = ResponseStream<proto::RestartResponse>;
+    type ResetStream = ResponseStream<proto::ResetResponse>;
 
     async fn watch_state(
         &self,
@@ -72,6 +73,25 @@ impl EngineService for EngineApi {
             },
             |state| proto::RestartResponse {
                 event: Some(restart_response::Event::State(state.into())),
+            },
+        )))
+    }
+
+    async fn reset(&self, request: Request<proto::ResetRequest>) -> Result<Response<Self::ResetStream>, Status> {
+        let scope = match request.into_inner().scope() {
+            proto::ResetScope::Runtime => ResetScope::Runtime,
+            proto::ResetScope::Factory => ResetScope::Factory,
+            proto::ResetScope::Unspecified => return Err(Status::invalid_argument("a reset scope is required")),
+        };
+        let events = self.0.supervisor.reset(scope).await.boxed();
+
+        Ok(Response::new(operation(
+            events,
+            |progress| proto::ResetResponse {
+                event: Some(reset_response::Event::Progress(progress)),
+            },
+            |state| proto::ResetResponse {
+                event: Some(reset_response::Event::State(state.into())),
             },
         )))
     }

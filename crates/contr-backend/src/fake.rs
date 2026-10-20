@@ -29,7 +29,7 @@ impl Backend for FakeBackend {
     }
 
     fn capabilities(&self) -> &'static [Capability] {
-        &[]
+        &[Capability::Reset]
     }
 
     async fn probe(&self) -> Result<Probe, BackendError> {

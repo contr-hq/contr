@@ -9,7 +9,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::time::{self, Instant, MissedTickBehavior};
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::{Backend, BackendError, EngineConnector, EngineState, Progress, ProgressSink};
+use crate::{Backend, BackendError, Capability, EngineConnector, EngineState, Progress, ProgressSink, ResetScope};
 
 const COMMAND_QUEUE: usize = 16;
 const EVENT_QUEUE: usize = 64;
@@ -128,6 +128,7 @@ enum Operation {
     Start,
     Stop,
     Restart,
+    Reset(ResetScope),
 }
 
 struct Command {
@@ -188,6 +189,12 @@ impl EngineSupervisor {
     /// Stops the engine when it runs, then starts it.
     pub async fn restart(&self) -> ReceiverStream<OperationEvent> {
         self.submit(Operation::Restart).await
+    }
+
+    /// Stops the engine, then restores it to a clean state; fails before stopping anything when the backend lacks
+    /// [`Capability::Reset`].
+    pub async fn reset(&self, scope: ResetScope) -> ReceiverStream<OperationEvent> {
+        self.submit(Operation::Reset(scope)).await
     }
 
     async fn submit(&self, operation: Operation) -> ReceiverStream<OperationEvent> {
@@ -264,6 +271,7 @@ impl Actor {
                 Ok(_) => self.start(&sink).await,
                 Err(error) => Err(error),
             },
+            Operation::Reset(scope) => self.reset(scope, &sink).await,
         };
 
         // The caller may have dropped the stream; the operation still completed.
@@ -338,6 +346,33 @@ impl Actor {
             Ok(()) => {
                 self.publish(EngineStatus::not_running(EngineState::Stopped));
                 Ok(EngineState::Stopped)
+            }
+            Err(error) => {
+                let status = self.detect().await;
+                self.publish(status);
+                Err(error.into())
+            }
+        }
+    }
+
+    async fn reset(&mut self, scope: ResetScope, sink: &dyn ProgressSink) -> Result<EngineState, OperationError> {
+        if !self.backend.capabilities().contains(&Capability::Reset) {
+            return Err(OperationError::new(
+                ErrorReason::FeatureUnavailable,
+                "this engine is not managed by Contr, so Contr cannot reset it",
+            ));
+        }
+        self.stop(sink).await?;
+
+        self.publish(EngineStatus::not_running(EngineState::Resetting));
+        match self.backend.reset(scope, sink).await {
+            Ok(()) => {
+                let state = match scope {
+                    ResetScope::Runtime => EngineState::Stopped,
+                    ResetScope::Factory => EngineState::Uninitialized,
+                };
+                self.publish(EngineStatus::not_running(state));
+                Ok(state)
             }
             Err(error) => {
                 let status = self.detect().await;
@@ -466,13 +501,14 @@ mod tests {
     use futures_util::StreamExt;
 
     use super::*;
-    use crate::{BackendKind, Blocker, Capability, Probe, ResetScope};
+    use crate::{BackendKind, Blocker, Probe};
 
     #[derive(Default)]
     struct ScriptedBackend {
         engine_up: AtomicBool,
         start_brings_engine_up: AtomicBool,
         blocked: AtomicBool,
+        resettable: AtomicBool,
         starts: AtomicU32,
     }
 
@@ -487,7 +523,11 @@ mod tests {
         }
 
         fn capabilities(&self) -> &'static [Capability] {
-            &[]
+            if self.resettable.load(Ordering::SeqCst) {
+                &[Capability::Reset]
+            } else {
+                &[]
+            }
         }
 
         async fn probe(&self) -> Result<Probe, BackendError> {
@@ -599,6 +639,34 @@ mod tests {
 
         assert_eq!(finished(supervisor.stop().await).await, Ok(EngineState::Stopped));
         assert_eq!(supervisor.status().connector(), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reset_stops_the_engine_and_reports_what_remains() {
+        let backend = working_backend();
+        backend.resettable.store(true, Ordering::SeqCst);
+        let supervisor = supervisor(&backend).await;
+        finished(supervisor.start().await).await.unwrap();
+
+        let factory = finished(supervisor.reset(ResetScope::Factory).await).await;
+        assert_eq!(factory, Ok(EngineState::Uninitialized));
+        assert!(!backend.engine_up.load(Ordering::SeqCst));
+
+        finished(supervisor.start().await).await.unwrap();
+        let runtime = finished(supervisor.reset(ResetScope::Runtime).await).await;
+        assert_eq!(runtime, Ok(EngineState::Stopped));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reset_leaves_an_engine_it_does_not_own_running() {
+        let backend = working_backend();
+        let supervisor = supervisor(&backend).await;
+        finished(supervisor.start().await).await.unwrap();
+
+        let error = finished(supervisor.reset(ResetScope::Factory).await).await.unwrap_err();
+
+        assert_eq!(error.reason, ErrorReason::FeatureUnavailable);
+        assert_eq!(supervisor.status().state(), EngineState::Running);
     }
 
     #[tokio::test(start_paused = true)]

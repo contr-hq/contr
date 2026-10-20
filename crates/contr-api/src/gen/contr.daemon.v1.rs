@@ -110,6 +110,8 @@ pub enum Capability {
     ResourceLimits = 3,
     WslIntegration = 4,
     HostPortForwarding = 5,
+    /// EngineService.Reset is available.
+    Reset = 6,
 }
 impl Capability {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -124,6 +126,7 @@ impl Capability {
             Self::ResourceLimits => "CAPABILITY_RESOURCE_LIMITS",
             Self::WslIntegration => "CAPABILITY_WSL_INTEGRATION",
             Self::HostPortForwarding => "CAPABILITY_HOST_PORT_FORWARDING",
+            Self::Reset => "CAPABILITY_RESET",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -135,6 +138,7 @@ impl Capability {
             "CAPABILITY_RESOURCE_LIMITS" => Some(Self::ResourceLimits),
             "CAPABILITY_WSL_INTEGRATION" => Some(Self::WslIntegration),
             "CAPABILITY_HOST_PORT_FORWARDING" => Some(Self::HostPortForwarding),
+            "CAPABILITY_RESET" => Some(Self::Reset),
             _ => None,
         }
     }
