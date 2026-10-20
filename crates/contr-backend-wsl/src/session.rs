@@ -143,6 +143,7 @@ impl Session {
 fn relay(listener: Listener, opener: Opener) -> JoinHandle<()> {
     let rewrites = Arc::new(Rewrites {
         drives_root: guest::WINDOWS_DRIVES.to_owned(),
+        distro_root: None,
         host_alias: true,
     });
     tokio::spawn(async move {
