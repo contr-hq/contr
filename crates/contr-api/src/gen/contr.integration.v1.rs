@@ -40,6 +40,81 @@ pub struct CliTool {
     #[prost(string, tag = "3")]
     pub installed_version: ::prost::alloc::string::String,
 }
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListWslDistributionsRequest {}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListWslDistributionsResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub distributions: ::prost::alloc::vec::Vec<WslDistribution>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetWslIntegrationRequest {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(bool, tag = "2")]
+    pub enabled: bool,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetWslIntegrationResponse {
+    #[prost(message, optional, tag = "1")]
+    pub distribution: ::core::option::Option<WslDistribution>,
+}
+/// One of the user's WSL distributions.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WslDistribution {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    /// 1 or 2; only version 2 distributions can reach the engine.
+    #[prost(uint32, tag = "2")]
+    pub wsl_version: u32,
+    /// `wsl.exe` starts this distribution when none is named.
+    #[prost(bool, tag = "3")]
+    pub is_default: bool,
+    #[prost(enumeration = "WslIntegrationState", tag = "4")]
+    pub integration_state: i32,
+    /// Why the last attempt failed; empty unless the state is FAILED.
+    #[prost(string, tag = "5")]
+    pub failure: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum WslIntegrationState {
+    Unspecified = 0,
+    /// Engine access is off.
+    Disabled = 1,
+    /// Engine access is on and waits for the engine to run or for the distribution to start serving it.
+    Pending = 2,
+    /// `docker` in the distribution reaches the engine.
+    Active = 3,
+    /// Engine access is on, but the last attempt failed; Contr retries.
+    Failed = 4,
+}
+impl WslIntegrationState {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "WSL_INTEGRATION_STATE_UNSPECIFIED",
+            Self::Disabled => "WSL_INTEGRATION_STATE_DISABLED",
+            Self::Pending => "WSL_INTEGRATION_STATE_PENDING",
+            Self::Active => "WSL_INTEGRATION_STATE_ACTIVE",
+            Self::Failed => "WSL_INTEGRATION_STATE_FAILED",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "WSL_INTEGRATION_STATE_UNSPECIFIED" => Some(Self::Unspecified),
+            "WSL_INTEGRATION_STATE_DISABLED" => Some(Self::Disabled),
+            "WSL_INTEGRATION_STATE_PENDING" => Some(Self::Pending),
+            "WSL_INTEGRATION_STATE_ACTIVE" => Some(Self::Active),
+            "WSL_INTEGRATION_STATE_FAILED" => Some(Self::Failed),
+            _ => None,
+        }
+    }
+}
 /// Generated client implementations.
 #[cfg(feature = "client")]
 pub mod integration_service_client {
@@ -183,6 +258,69 @@ pub mod integration_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /// Lists the calling user's WSL distributions, without Contr's own, and their access to the engine; fails with
+        /// FEATURE_UNAVAILABLE where the engine does not run in WSL.
+        pub async fn list_wsl_distributions(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListWslDistributionsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListWslDistributionsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.integration.v1.IntegrationService/ListWslDistributions",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "contr.integration.v1.IntegrationService",
+                        "ListWslDistributions",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        /// Turns engine access from one WSL distribution on or off and keeps the choice across restarts; fails with
+        /// FEATURE_UNAVAILABLE where the engine does not run in WSL, NOT_FOUND for a distribution that is not registered,
+        /// and FAILED_PRECONDITION for a WSL 1 distribution.
+        pub async fn set_wsl_integration(
+            &mut self,
+            request: impl tonic::IntoRequest<super::SetWslIntegrationRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::SetWslIntegrationResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.integration.v1.IntegrationService/SetWslIntegration",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "contr.integration.v1.IntegrationService",
+                        "SetWslIntegration",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -214,6 +352,25 @@ pub mod integration_service_server {
             request: tonic::Request<super::InstallCliToolsRequest>,
         ) -> std::result::Result<
             tonic::Response<super::InstallCliToolsResponse>,
+            tonic::Status,
+        >;
+        /// Lists the calling user's WSL distributions, without Contr's own, and their access to the engine; fails with
+        /// FEATURE_UNAVAILABLE where the engine does not run in WSL.
+        async fn list_wsl_distributions(
+            &self,
+            request: tonic::Request<super::ListWslDistributionsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListWslDistributionsResponse>,
+            tonic::Status,
+        >;
+        /// Turns engine access from one WSL distribution on or off and keeps the choice across restarts; fails with
+        /// FEATURE_UNAVAILABLE where the engine does not run in WSL, NOT_FOUND for a distribution that is not registered,
+        /// and FAILED_PRECONDITION for a WSL 1 distribution.
+        async fn set_wsl_integration(
+            &self,
+            request: tonic::Request<super::SetWslIntegrationRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::SetWslIntegrationResponse>,
             tonic::Status,
         >;
     }
@@ -374,6 +531,104 @@ pub mod integration_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = InstallCliToolsSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.integration.v1.IntegrationService/ListWslDistributions" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListWslDistributionsSvc<T: IntegrationService>(pub Arc<T>);
+                    impl<
+                        T: IntegrationService,
+                    > tonic::server::UnaryService<super::ListWslDistributionsRequest>
+                    for ListWslDistributionsSvc<T> {
+                        type Response = super::ListWslDistributionsResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListWslDistributionsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as IntegrationService>::list_wsl_distributions(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ListWslDistributionsSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.integration.v1.IntegrationService/SetWslIntegration" => {
+                    #[allow(non_camel_case_types)]
+                    struct SetWslIntegrationSvc<T: IntegrationService>(pub Arc<T>);
+                    impl<
+                        T: IntegrationService,
+                    > tonic::server::UnaryService<super::SetWslIntegrationRequest>
+                    for SetWslIntegrationSvc<T> {
+                        type Response = super::SetWslIntegrationResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::SetWslIntegrationRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as IntegrationService>::set_wsl_integration(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = SetWslIntegrationSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
