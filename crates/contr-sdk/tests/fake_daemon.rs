@@ -16,6 +16,8 @@ use contr_sdk::api::engine::v1::{
     EngineState, ResetRequest, ResetScope, StartRequest, StopRequest, StreamUsageRequest, reset_response,
     start_response, stop_response,
 };
+use contr_sdk::api::images::v1::InspectImageRequest;
+use contr_sdk::api::networks::v1::{CheckHostPortsRequest, HostPort};
 use contr_sdk::{Client, ClientIdentity, Endpoint, Error};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -456,5 +458,69 @@ async fn container_stats_cover_every_running_container() {
     }
 
     drop(samples);
+    daemon.stop().await;
+}
+
+#[tokio::test]
+async fn inspecting_an_image_reports_what_it_runs_and_exposes() {
+    let daemon = Daemon::start();
+    let client = daemon.client().await;
+    start_engine(&client).await;
+
+    let inspected = client
+        .images()
+        .inspect_image(InspectImageRequest {
+            reference: "nginx:1.29".to_owned(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    let details = inspected.details.unwrap();
+    assert_eq!(details.exposed_ports, ["80/tcp"]);
+    assert_eq!(details.command, ["nginx", "-g", "daemon off;"]);
+    assert_eq!(details.os, "linux");
+    assert_eq!(inspected.image.unwrap().repo_tags, ["nginx:1.29"]);
+
+    let missing = client
+        .images()
+        .inspect_image(InspectImageRequest {
+            reference: "redis:8".to_owned(),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(Error::from(missing), Error::NotFound(_)));
+
+    daemon.stop().await;
+}
+
+#[tokio::test]
+async fn host_ports_are_checked_while_the_engine_is_stopped() {
+    let daemon = Daemon::start();
+    let client = daemon.client().await;
+    let held = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let held_port = u32::from(held.local_addr().unwrap().port());
+    let free_port = {
+        let probe = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        u32::from(probe.local_addr().unwrap().port())
+    };
+    let port = |port| HostPort {
+        port,
+        ..Default::default()
+    };
+
+    let statuses = client
+        .networks()
+        .check_host_ports(CheckHostPortsRequest {
+            ports: vec![port(held_port), port(free_port)],
+        })
+        .await
+        .unwrap()
+        .into_inner()
+        .ports;
+
+    assert!(statuses[0].in_use);
+    assert!(!statuses[1].in_use);
+    assert_eq!(statuses[1].port.unwrap().port, free_port);
+
     daemon.stop().await;
 }
