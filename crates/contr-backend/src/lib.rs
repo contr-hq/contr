@@ -43,6 +43,8 @@ pub enum Capability {
     WslIntegration,
     /// Published container ports forwarded by Contr instead of the platform.
     HostPortForwarding,
+    /// Restoring the engine to a clean state, which only a backend that owns its engine offers.
+    Reset,
 }
 
 /// Engine lifecycle state reported to clients.

@@ -44,6 +44,8 @@ enum Capability {
   CAPABILITY_RESOURCE_LIMITS = 3;
   CAPABILITY_WSL_INTEGRATION = 4;
   CAPABILITY_HOST_PORT_FORWARDING = 5;
+  // EngineService.Reset is available.
+  CAPABILITY_RESET = 6;
 }
 
 message GetInfoRequest {}

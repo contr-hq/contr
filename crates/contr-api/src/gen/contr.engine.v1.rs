@@ -63,6 +63,27 @@ pub mod restart_response {
         State(i32),
     }
 }
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ResetRequest {
+    #[prost(enumeration = "ResetScope", tag = "1")]
+    pub scope: i32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ResetResponse {
+    #[prost(oneof = "reset_response::Event", tags = "1, 2")]
+    pub event: ::core::option::Option<reset_response::Event>,
+}
+/// Nested message and enum types in `ResetResponse`.
+pub mod reset_response {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Event {
+        #[prost(message, tag = "1")]
+        Progress(super::super::super::common::v1::Progress),
+        /// Last message of the stream.
+        #[prost(enumeration = "super::EngineState", tag = "2")]
+        State(i32),
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum EngineState {
@@ -109,6 +130,37 @@ impl EngineState {
             "ENGINE_STATE_UPDATING" => Some(Self::Updating),
             "ENGINE_STATE_RESETTING" => Some(Self::Resetting),
             "ENGINE_STATE_FAILED" => Some(Self::Failed),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ResetScope {
+    Unspecified = 0,
+    /// Replaces the engine's runtime and keeps images, containers and volumes; the engine ends STOPPED.
+    Runtime = 1,
+    /// Deletes every image, container, volume and the build cache; the engine ends UNINITIALIZED.
+    Factory = 2,
+}
+impl ResetScope {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "RESET_SCOPE_UNSPECIFIED",
+            Self::Runtime => "RESET_SCOPE_RUNTIME",
+            Self::Factory => "RESET_SCOPE_FACTORY",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "RESET_SCOPE_UNSPECIFIED" => Some(Self::Unspecified),
+            "RESET_SCOPE_RUNTIME" => Some(Self::Runtime),
+            "RESET_SCOPE_FACTORY" => Some(Self::Factory),
             _ => None,
         }
     }
@@ -295,6 +347,32 @@ pub mod engine_service_client {
                 .insert(GrpcMethod::new("contr.engine.v1.EngineService", "Restart"));
             self.inner.server_streaming(req, path, codec).await
         }
+        /// Stops the engine, then restores it to a clean state; fails with FEATURE_UNAVAILABLE, before stopping anything,
+        /// where the daemon does not own the engine. Cancelling the call does not cancel the operation.
+        pub async fn reset(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ResetRequest>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::ResetResponse>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.engine.v1.EngineService/Reset",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("contr.engine.v1.EngineService", "Reset"));
+            self.inner.server_streaming(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -355,6 +433,18 @@ pub mod engine_service_server {
             &self,
             request: tonic::Request<super::RestartRequest>,
         ) -> std::result::Result<tonic::Response<Self::RestartStream>, tonic::Status>;
+        /// Server streaming response type for the Reset method.
+        type ResetStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::ResetResponse, tonic::Status>,
+            >
+            + std::marker::Send
+            + 'static;
+        /// Stops the engine, then restores it to a clean state; fails with FEATURE_UNAVAILABLE, before stopping anything,
+        /// where the daemon does not own the engine. Cancelling the call does not cancel the operation.
+        async fn reset(
+            &self,
+            request: tonic::Request<super::ResetRequest>,
+        ) -> std::result::Result<tonic::Response<Self::ResetStream>, tonic::Status>;
     }
     /// Lifecycle of the container engine the daemon manages.
     #[derive(Debug)]
@@ -602,6 +692,52 @@ pub mod engine_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = RestartSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.server_streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.engine.v1.EngineService/Reset" => {
+                    #[allow(non_camel_case_types)]
+                    struct ResetSvc<T: EngineService>(pub Arc<T>);
+                    impl<
+                        T: EngineService,
+                    > tonic::server::ServerStreamingService<super::ResetRequest>
+                    for ResetSvc<T> {
+                        type Response = super::ResetResponse;
+                        type ResponseStream = T::ResetStream;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::ResponseStream>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ResetRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as EngineService>::reset(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ResetSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

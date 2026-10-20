@@ -17,6 +17,9 @@ service EngineService {
   rpc Stop(StopRequest) returns (stream StopResponse);
   // Stops and starts the engine; cancelling the call does not cancel the operation.
   rpc Restart(RestartRequest) returns (stream RestartResponse);
+  // Stops the engine, then restores it to a clean state; fails with FEATURE_UNAVAILABLE, before stopping anything,
+  // where the daemon does not own the engine. Cancelling the call does not cancel the operation.
+  rpc Reset(ResetRequest) returns (stream ResetResponse);
 }
 
 message WatchStateRequest {}
@@ -63,6 +66,26 @@ message StopResponse {
 message RestartRequest {}
 
 message RestartResponse {
+  oneof event {
+    contr.common.v1.Progress progress = 1;
+    // Last message of the stream.
+    EngineState state = 2;
+  }
+}
+
+message ResetRequest {
+  ResetScope scope = 1;
+}
+
+enum ResetScope {
+  RESET_SCOPE_UNSPECIFIED = 0;
+  // Replaces the engine's runtime and keeps images, containers and volumes; the engine ends STOPPED.
+  RESET_SCOPE_RUNTIME = 1;
+  // Deletes every image, container, volume and the build cache; the engine ends UNINITIALIZED.
+  RESET_SCOPE_FACTORY = 2;
+}
+
+message ResetResponse {
   oneof event {
     contr.common.v1.Progress progress = 1;
     // Last message of the stream.

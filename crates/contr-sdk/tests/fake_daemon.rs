@@ -10,8 +10,10 @@ use contr_sdk::api::containers::v1::{
     PruneContainersRequest, RemoveContainerRequest, RenameContainerRequest, StopContainerRequest,
     UnpauseContainerRequest, WatchContainersRequest,
 };
-use contr_sdk::api::daemon::v1::BackendKind;
-use contr_sdk::api::engine::v1::{EngineState, StartRequest, StopRequest, start_response, stop_response};
+use contr_sdk::api::daemon::v1::{BackendKind, Capability};
+use contr_sdk::api::engine::v1::{
+    EngineState, ResetRequest, ResetScope, StartRequest, StopRequest, reset_response, start_response, stop_response,
+};
 use contr_sdk::{Client, ClientIdentity, Endpoint, Error};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -305,6 +307,43 @@ async fn creating_needs_a_local_image_and_a_free_name() {
         .await
         .unwrap_err();
     assert!(matches!(Error::from(taken), Error::Conflict(_)));
+
+    daemon.stop().await;
+}
+
+#[tokio::test]
+async fn factory_reset_empties_the_engine() {
+    let daemon = Daemon::start();
+    let client = daemon.client().await;
+    assert!(
+        client
+            .handshake()
+            .capabilities()
+            .any(|capability| capability == Capability::Reset)
+    );
+    start_engine(&client).await;
+
+    let mut events = client
+        .engine()
+        .reset(ResetRequest {
+            scope: ResetScope::Factory.into(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    let mut last = None;
+    while let Some(event) = events.message().await.unwrap() {
+        last = event.event;
+    }
+
+    assert_eq!(
+        last,
+        Some(reset_response::Event::State(EngineState::Uninitialized.into()))
+    );
+    assert!(matches!(
+        client.list_containers().await,
+        Err(Error::EngineNotRunning(_))
+    ));
 
     daemon.stop().await;
 }

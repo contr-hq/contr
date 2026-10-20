@@ -64,7 +64,7 @@ impl Backend for WslBackend {
     }
 
     fn capabilities(&self) -> &'static [Capability] {
-        &[Capability::WslIntegration]
+        &[Capability::WslIntegration, Capability::Reset]
     }
 
     async fn probe(&self) -> Result<Probe, BackendError> {
