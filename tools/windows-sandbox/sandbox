@@ -48,6 +48,8 @@ Usage: $(basename "$0") <command> [arguments]
   start | stop           Boot or shut down the VM
   ssh [command...]       Open a PowerShell session or run a command as $GUEST_USER
   sync <dir> [guest-dir] Copy a git working tree into the VM (default C:/src/<name>), pruning deleted files
+  put <file>... <guest-dir>
+                         Copy files into a directory in the VM
   gui <program> [args]   Start a program on the interactive desktop
   screenshot [file.png]  Save the VM display (default $STATE_DIR/screenshot.png)
   console                Open the VM display in virt-manager
@@ -95,6 +97,11 @@ ssh_guest() {
 }
 
 run_guest() { ssh_guest "$GUEST_USER@$IP" "$@"; }
+
+ssh_guest_copy() {
+    scp -q -i "$SSH_KEY" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 \
+        -o UserKnownHostsFile="$KNOWN_HOSTS" -o StrictHostKeyChecking=accept-new "$@"
+}
 
 pwsh_guest() {
     local script encoded
@@ -366,6 +373,16 @@ cmd_sync() {
     pwsh_guest "$(render "$SCRIPT_DIR/guest/prune.ps1" "ROOT=$(ps_quote "$target")")"
 }
 
+cmd_put() {
+    (($# >= 2)) || die "usage: put <file>... <guest-dir>"
+    local target=${*: -1} files=("${@:1:$#-1}") file
+    for file in "${files[@]}"; do
+        [[ -f $file ]] || die "$file is not a file"
+    done
+    pwsh_guest "New-Item -ItemType Directory -Force -Path $(ps_quote "$target") | Out-Null"
+    ssh_guest_copy "${files[@]}" "$GUEST_USER@$IP:$target/"
+}
+
 cmd_gui() {
     local program=${1:?usage: gui <program> [arguments]}
     shift
@@ -444,7 +461,7 @@ main() {
     local command=${1:-help}
     (($# > 0)) && shift
     case $command in
-    create | wait | status | start | stop | ssh | sync | gui | screenshot | console | rdp | destroy)
+    create | wait | status | start | stop | ssh | sync | put | gui | screenshot | console | rdp | destroy)
         "cmd_$command" "$@"
         ;;
     help | -h | --help) usage ;;
