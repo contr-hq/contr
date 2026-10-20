@@ -19,9 +19,9 @@ generator. The desktop clients live in their own repositories and talk to the da
 - Linux: `contrd` manages a Docker Engine or Podman installed on the host and serves the gRPC API on a per-user
   socket. The `contr` CLI, the Rust SDK and the generated C# SDK talk to it.
 - Windows (Phase 2, in progress): `contrd` runs Moby in two Contr-owned WSL 2 distributions and serves the engine on a
-  per-user named pipe with the `contr` docker context; Windows bind paths such as `-v C:\src:/w` work.
-  `host.docker.internal` resolves to the Windows host, but Windows Firewall blocks it until host connections are
-  relayed by `contrd`. CLI installation and integration with the user's own distributions are not done yet.
+  per-user named pipe with the `contr` docker context. Windows bind paths such as `-v C:\src:/w` work, and
+  `host.docker.internal` reaches services on the Windows host, including those bound to `localhost`. CLI
+  installation and integration with the user's own distributions are not done yet.
 
 ## Layout
 
