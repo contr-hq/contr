@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package contr.integration.v1;
+
+option csharp_namespace = "Contr.Sdk.Integration.V1";
+
+// Integration of the engine with the user's own tools.
+service IntegrationService {
+  // Reports the Docker CLI tools this daemon bundles and the ones installed for the calling user.
+  rpc GetCliTools(GetCliToolsRequest) returns (GetCliToolsResponse);
+  // Installs the bundled Docker CLI tools for the calling user and adds them to the user's PATH; fails with
+  // FEATURE_UNAVAILABLE where the daemon bundles none.
+  rpc InstallCliTools(InstallCliToolsRequest) returns (InstallCliToolsResponse);
+}
+
+message GetCliToolsRequest {}
+
+message GetCliToolsResponse {
+  CliTools cli_tools = 1;
+}
+
+message InstallCliToolsRequest {}
+
+message InstallCliToolsResponse {
+  CliTools cli_tools = 1;
+}
+
+// Docker CLI tools for the calling user.
+message CliTools {
+  repeated CliTool tools = 1;
+  // Directory that holds the installed `docker` executable.
+  string bin_dir = 2;
+  // A new shell resolves `docker` to the installed executable.
+  bool on_path = 3;
+  // Another `docker` executable a new shell resolves first; empty when none.
+  string shadowed_by = 4;
+}
+
+message CliTool {
+  // Such as "docker", "compose", "buildx" or "credential-wincred".
+  string name = 1;
+  // Version this daemon bundles; empty when it bundles none.
+  string bundled_version = 2;
+  // Version installed for the user; empty when not installed.
+  string installed_version = 3;
+}
