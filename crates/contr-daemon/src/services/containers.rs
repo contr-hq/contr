@@ -23,6 +23,7 @@ impl ContainersService for ContainersApi {
     type StreamLogsStream = ResponseStream<proto::StreamLogsResponse>;
     type StreamStatsStream = ResponseStream<proto::StreamStatsResponse>;
     type ExecStream = ResponseStream<proto::ExecResponse>;
+    type WatchContainerStatsStream = ResponseStream<proto::WatchContainerStatsResponse>;
 
     async fn list_containers(
         &self,
@@ -182,6 +183,16 @@ impl ContainersService for ContainersApi {
         });
 
         Ok(Response::new(started.chain(relayed).chain(exited).boxed()))
+    }
+
+    async fn watch_container_stats(
+        &self,
+        _: Request<proto::WatchContainerStatsRequest>,
+    ) -> Result<Response<Self::WatchContainerStatsStream>, Status> {
+        let samples = self.0.slot.get().await?.cache.watch_container_stats();
+        Ok(Response::new(watch(samples, |stats| {
+            proto::WatchContainerStatsResponse { stats }
+        })))
     }
 
     async fn create_container(
