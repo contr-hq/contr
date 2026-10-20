@@ -1,6 +1,7 @@
 //! `contr`, the command-line interface to the Contr daemon.
 
 mod cli_tools;
+mod doctor;
 mod exec;
 mod format;
 mod wsl;
@@ -49,6 +50,13 @@ enum Command {
     /// Show or install the Docker CLI tools the daemon bundles.
     #[command(subcommand)]
     Cli(cli_tools::CliCommand),
+    /// Check what keeps the engine or its features from working.
+    Doctor,
+    /// Run a fix that `doctor` offers.
+    Fix {
+        /// Identifier `doctor` prints, such as install-wsl.
+        action_id: String,
+    },
     /// Show or change which of your WSL distributions reach the engine.
     #[command(subcommand)]
     Wsl(wsl::WslCommand),
@@ -83,6 +91,8 @@ async fn run(command: Command) -> anyhow::Result<i32> {
         Command::Exec(args) => exec::run(&Client::connect_default(&identity).await?, args).await,
         Command::Cli(command) => cli_tools::run(&Client::connect_or_start(&identity).await?, command).await,
         Command::Wsl(command) => wsl::run(&Client::connect_or_start(&identity).await?, command).await,
+        Command::Doctor => doctor::doctor(&Client::connect_or_start(&identity).await?).await,
+        Command::Fix { action_id } => doctor::fix(&Client::connect_or_start(&identity).await?, action_id).await,
     }
 }
 
