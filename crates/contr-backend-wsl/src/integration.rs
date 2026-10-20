@@ -49,6 +49,18 @@ impl Integrations {
         });
     }
 
+    /// Requested distributions with the state of their integration.
+    pub(crate) fn states(&self) -> Vec<(String, IntegrationState)> {
+        let requested = self.requested.borrow().clone();
+        requested
+            .into_iter()
+            .map(|name| {
+                let state = self.state(&name);
+                (name, state)
+            })
+            .collect()
+    }
+
     pub(crate) fn state(&self, name: &str) -> IntegrationState {
         if !self.requested.borrow().contains(name) {
             return IntegrationState::Disabled;

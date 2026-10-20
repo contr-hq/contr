@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use contr_backend::{
-    Backend, BackendError, BackendKind, Blocker, Capability, EngineConnector, Probe, Progress, ProgressSink,
-    ResetScope, WslDistribution, WslIntegration,
+    Backend, BackendError, BackendKind, Blocker, Capability, Check, CheckStatus, EngineConnector, IntegrationState,
+    Probe, Progress, ProgressSink, RemediationOutcome, ResetScope, WslDistribution, WslIntegration,
 };
 use contr_core::{ErrorReason, Remediation, paths, product};
 use tokio::sync::Mutex;
@@ -17,6 +17,8 @@ use crate::wsl;
 
 /// Pipe the Docker CLI uses when neither a context nor `DOCKER_HOST` names another.
 const DOCKER_DEFAULT_PIPE: &str = r"\\.\pipe\docker_engine";
+/// Exit code of an installer whose changes take effect after a restart.
+const RESTART_REQUIRED: u32 = 3010;
 
 /// Backend that runs the engine in two WSL 2 distributions: a runtime distribution replaced whenever its release
 /// differs from the bundled image, and a data distribution that keeps engine data across those replacements.
@@ -160,6 +162,91 @@ impl Backend for WslBackend {
         Ok(())
     }
 
+    fn remediations(&self) -> &'static [Remediation] {
+        &[Remediation::INSTALL_WSL]
+    }
+
+    async fn diagnose(&self) -> Vec<Check> {
+        let images = GuestImages::load(&self.images_dir);
+        let mut checks = vec![match &images {
+            Ok(images) => Check::new(
+                "guest-images",
+                "Guest images",
+                CheckStatus::Pass,
+                format!("Release {} is bundled.", images.release),
+            ),
+            Err(error) => Check::new(
+                "guest-images",
+                "Guest images",
+                CheckStatus::Fail,
+                format!("The bundled guest images are unusable: {error}"),
+            ),
+        }];
+        if wsl::version().await.is_none() {
+            checks.push(Check::new(
+                "runtime-distro",
+                "Runtime distribution",
+                CheckStatus::Skip,
+                "WSL is not available.",
+            ));
+            checks.push(Check::new(
+                "data-distro",
+                "Data distribution",
+                CheckStatus::Skip,
+                "WSL is not available.",
+            ));
+            return checks;
+        }
+
+        let installed = wsl::distributions().await.unwrap_or_default();
+        let bundled = images.as_ref().ok().map(|images| images.release.as_str());
+        checks.push(runtime_check(&installed, bundled).await);
+        checks.push(if installed.iter().any(|name| name == product::WSL_DATA_DISTRO) {
+            Check::new(
+                "data-distro",
+                "Data distribution",
+                CheckStatus::Pass,
+                "Keeps engine data across runtime updates.",
+            )
+        } else {
+            Check::new(
+                "data-distro",
+                "Data distribution",
+                CheckStatus::Skip,
+                "Created at the first start.",
+            )
+        });
+        checks.extend(self.default_pipe_check().await);
+        checks.push(integration_check(&self.integrations.states()));
+
+        checks
+    }
+
+    async fn remediate(
+        &self,
+        remediation: &Remediation,
+        progress: &dyn ProgressSink,
+    ) -> Result<RemediationOutcome, BackendError> {
+        if *remediation != Remediation::INSTALL_WSL {
+            return Err(io::Error::other(format!("cannot run {}", remediation.action_id)).into());
+        }
+
+        report(progress, "Installing WSL; approve the administrator prompt");
+        let code = tokio::task::spawn_blocking(|| {
+            contr_platform::elevation::run_elevated("wsl.exe", "--install --no-distribution")
+        })
+        .await
+        .map_err(io::Error::other)??;
+        if code != 0 && code != RESTART_REQUIRED {
+            return Err(io::Error::other(format!("wsl --install exited with {code}")).into());
+        }
+
+        Ok(RemediationOutcome {
+            restart_required: code == RESTART_REQUIRED || wsl::version().await.is_none(),
+            logout_required: false,
+        })
+    }
+
     async fn reset(&self, scope: ResetScope, progress: &dyn ProgressSink) -> Result<(), BackendError> {
         let installed = wsl::distributions().await?;
         let mut targets = vec![product::WSL_RUNTIME_DISTRO];
@@ -198,6 +285,105 @@ impl WslIntegration for WslBackend {
     async fn set_integrated(&self, name: &str, integrated: bool) {
         self.integrations.set(name, integrated);
     }
+}
+
+impl WslBackend {
+    async fn default_pipe_check(&self) -> Option<Check> {
+        const ID: &str = "default-pipe";
+        const TITLE: &str = "Standard Docker pipe";
+
+        if !self.shared_pipes.iter().any(|pipe| pipe == DOCKER_DEFAULT_PIPE) {
+            return None;
+        }
+        let mut session = self.session.lock().await;
+        let alive = session.as_mut().is_some_and(Session::is_alive);
+        let serving = session
+            .as_ref()
+            .filter(|_| alive)
+            .map(|session| session.serves(DOCKER_DEFAULT_PIPE));
+        let check = match serving {
+            Some(true) => Check::new(
+                ID,
+                TITLE,
+                CheckStatus::Pass,
+                format!("Contr serves {DOCKER_DEFAULT_PIPE}, so tools that ignore Docker contexts reach this engine."),
+            ),
+            Some(false) => Check::new(
+                ID,
+                TITLE,
+                CheckStatus::Warn,
+                format!(
+                    "Another program serves {DOCKER_DEFAULT_PIPE}, so tools that ignore Docker contexts reach it \
+                     instead of this engine."
+                ),
+            ),
+            None => Check::new(ID, TITLE, CheckStatus::Skip, "The engine is not running."),
+        };
+
+        Some(check)
+    }
+}
+
+async fn runtime_check(installed: &[String], bundled: Option<&str>) -> Check {
+    const ID: &str = "runtime-distro";
+    const TITLE: &str = "Runtime distribution";
+
+    if !installed.iter().any(|name| name == product::WSL_RUNTIME_DISTRO) {
+        return Check::new(ID, TITLE, CheckStatus::Skip, "Created at the first start.");
+    }
+    match wsl::release(product::WSL_RUNTIME_DISTRO).await {
+        Ok(release) => {
+            let detail = match bundled {
+                Some(bundled) if bundled != release => {
+                    format!("Release {release}; release {bundled} replaces it at the next start.")
+                }
+                _ => format!("Release {release}."),
+            };
+            Check::new(ID, TITLE, CheckStatus::Pass, detail)
+        }
+        Err(error) => Check::new(
+            ID,
+            TITLE,
+            CheckStatus::Warn,
+            format!("Cannot read its release: {error}"),
+        ),
+    }
+}
+
+fn integration_check(states: &[(String, IntegrationState)]) -> Check {
+    const ID: &str = "wsl-integrations";
+    const TITLE: &str = "WSL distributions";
+
+    let failures: Vec<String> = states
+        .iter()
+        .filter_map(|(name, state)| match state {
+            IntegrationState::Failed(reason) => Some(format!("{name}: {reason}")),
+            _ => None,
+        })
+        .collect();
+    if states.is_empty() {
+        Check::new(ID, TITLE, CheckStatus::Skip, "No WSL distribution is integrated.")
+    } else if !failures.is_empty() {
+        Check::new(ID, TITLE, CheckStatus::Warn, failures.join("; "))
+    } else if states.iter().all(|(_, state)| *state == IntegrationState::Active) {
+        let verb = if states.len() == 1 { "reaches" } else { "reach" };
+        Check::new(
+            ID,
+            TITLE,
+            CheckStatus::Pass,
+            format!("{} {verb} the engine.", names(states)),
+        )
+    } else {
+        Check::new(ID, TITLE, CheckStatus::Skip, "Integrations start with the engine.")
+    }
+}
+
+fn names(states: &[(String, IntegrationState)]) -> String {
+    states
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn report(progress: &dyn ProgressSink, message: &str) {

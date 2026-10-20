@@ -4,13 +4,14 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use contr_backend::{
-    Backend, BackendError, BackendKind, Blocker, Capability, EngineConnector, Probe, Progress, ProgressSink, ResetScope,
+    Backend, BackendError, BackendKind, Blocker, Capability, Check, CheckStatus, EngineConnector, Probe, Progress,
+    ProgressSink, ResetScope,
 };
 use contr_core::{ErrorReason, Remediation};
 use tokio::net::UnixStream;
 use tokio::time::{self, Instant};
 
-use crate::discovery::{Candidate, candidates};
+use crate::discovery::{Candidate, Flavor, candidates};
 use crate::systemd::Systemd;
 
 const SOCKET_WAIT: Duration = Duration::from_secs(30);
@@ -162,6 +163,36 @@ impl Backend for HostBackend {
         Ok(())
     }
 
+    async fn diagnose(&self) -> Vec<Check> {
+        const ID: &str = "host-engine";
+        const TITLE: &str = "Host engine";
+
+        let check = match self.reachable().await {
+            Ok(Some(candidate)) => Check::new(
+                ID,
+                TITLE,
+                CheckStatus::Pass,
+                format!(
+                    "{} answers at {}.",
+                    flavor_name(candidate.flavor),
+                    candidate.socket.display()
+                ),
+            ),
+            Ok(None) => match self.startable().await {
+                Some(candidate) => Check::new(
+                    ID,
+                    TITLE,
+                    CheckStatus::Pass,
+                    format!("{} is installed and starts with Contr.", flavor_name(candidate.flavor)),
+                ),
+                None => Check::new(ID, TITLE, CheckStatus::Skip, "No engine is installed."),
+            },
+            Err(_) => Check::new(ID, TITLE, CheckStatus::Skip, "No engine socket is usable by this user."),
+        };
+
+        vec![check]
+    }
+
     async fn reset(&self, _scope: ResetScope, _progress: &dyn ProgressSink) -> Result<(), BackendError> {
         Err(BackendError::Blocked(Blocker::new(ErrorReason::FeatureUnavailable)))
     }
@@ -169,6 +200,16 @@ impl Backend for HostBackend {
 
 async fn start_unit(candidate: &Candidate, unit: &str) -> zbus::Result<()> {
     Systemd::connect(candidate.bus).await?.start(unit).await
+}
+
+fn flavor_name(flavor: Flavor) -> &'static str {
+    match flavor {
+        Flavor::DockerRootless => "Docker (rootless)",
+        Flavor::DockerRootful => "Docker",
+        Flavor::PodmanRootless => "Podman (rootless)",
+        Flavor::PodmanRootful => "Podman",
+        Flavor::External => "The configured engine",
+    }
 }
 
 fn connector(candidate: &Candidate) -> EngineConnector {
