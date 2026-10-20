@@ -21,6 +21,9 @@ use crate::Fixtures;
 pub(crate) type Body = UnsyncBoxBody<Bytes, Infallible>;
 
 const API_VERSION: &str = "1.51";
+const STATS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+const FAKE_CPUS: u64 = 4;
+const FAKE_MEMORY: u64 = 8_589_934_592;
 const EVENT_QUEUE: usize = 256;
 const EVENT_HISTORY: usize = 1000;
 
@@ -96,6 +99,13 @@ pub(crate) async fn route(engine: Arc<Engine>, request: Request<Incoming>) -> Re
         (&Method::GET, ["events"]) => events(&engine, query.get("since").and_then(|since| since.parse().ok())),
         (&Method::GET, ["containers", "json"]) => list_containers(&engine, &query),
         (&Method::GET, ["containers", id, "json"]) => inspect_container(&engine, id),
+        (&Method::GET, ["containers", id, "stats"]) => stats(
+            &engine,
+            id,
+            query
+                .get("stream")
+                .is_none_or(|stream| stream != "0" && stream != "false"),
+        ),
         (&Method::POST, ["containers", "create"]) => match read_json(request).await {
             Ok(body) => create_container(&engine, query.get("name").map(String::as_str), &body),
             Err(message) => error(StatusCode::BAD_REQUEST, message),
@@ -169,8 +179,8 @@ fn info(engine: &Engine) -> Value {
         "ContainersRunning": running,
         "Images": store.images.len(),
         "OperatingSystem": "Contr fake engine",
-        "NCPU": 4,
-        "MemTotal": 8_589_934_592_u64,
+        "NCPU": FAKE_CPUS,
+        "MemTotal": FAKE_MEMORY,
         "SecurityOptions": ["name=seccomp,profile=builtin"],
     })
 }
@@ -250,6 +260,63 @@ fn inspect_container(engine: &Engine, reference: &str) -> Response<Body> {
         },
         "Mounts": container.get("Mounts").cloned().unwrap_or_else(|| json!([])),
     }))
+}
+
+/// Samples in which a running container uses a quarter of one CPU and 50 MiB, one per second while `stream` is set.
+fn stats(engine: &Engine, reference: &str, stream: bool) -> Response<Body> {
+    let (id, name, running) = {
+        let store = engine.store();
+        let Some(container) = find_container(&store.containers, reference) else {
+            return no_such_container(reference);
+        };
+        (
+            container["Id"].clone(),
+            container["Names"][0].clone(),
+            container["State"] == "running",
+        )
+    };
+    let sample = move |tick: u64| {
+        let cpu = |tick: u64| if running { tick * 250_000_000 } else { 0 };
+        let system = |tick: u64| tick * FAKE_CPUS * 1_000_000_000;
+        json!({
+            "id": id,
+            "name": name,
+            "read": rfc3339(unix_now()),
+            "cpu_stats": {
+                "cpu_usage": { "total_usage": cpu(tick) },
+                "system_cpu_usage": system(tick),
+                "online_cpus": FAKE_CPUS,
+            },
+            "precpu_stats": {
+                "cpu_usage": { "total_usage": cpu(tick - 1) },
+                "system_cpu_usage": system(tick - 1),
+            },
+            "memory_stats": {
+                "usage": if running { 52_428_800_u64 } else { 0 },
+                "limit": FAKE_MEMORY,
+                "stats": { "inactive_file": 0 },
+            },
+            "pids_stats": { "current": u64::from(running) * 3 },
+            "networks": { "eth0": { "rx_bytes": tick * 1024, "tx_bytes": tick * 512 } },
+        })
+    };
+
+    if !stream {
+        return ok_json(&sample(1));
+    }
+    let frames = futures_util::stream::unfold(1_u64, move |tick| {
+        let frame = Bytes::from(format!("{}\n", sample(tick)));
+        async move {
+            if tick > 1 {
+                tokio::time::sleep(STATS_INTERVAL).await;
+            }
+            Some((Ok(Frame::data(frame)), tick + 1))
+        }
+    });
+    Response::builder()
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(BodyExt::boxed_unsync(StreamBody::new(frames)))
+        .unwrap_or_default()
 }
 
 fn change_container(engine: &Engine, reference: &str, action: &str) -> Response<Body> {
