@@ -25,6 +25,11 @@ pub mod contr {
             include!("contr.images.v1.rs");
         }
     }
+    pub mod integration {
+        pub mod v1 {
+            include!("contr.integration.v1.rs");
+        }
+    }
     pub mod networks {
         pub mod v1 {
             include!("contr.networks.v1.rs");
