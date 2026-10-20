@@ -27,6 +27,9 @@ service ContainersService {
   rpc StreamLogs(StreamLogsRequest) returns (stream StreamLogsResponse);
   // Streams resource usage samples computed the way `docker stats` computes them.
   rpc StreamStats(StreamStatsRequest) returns (stream StreamStatsResponse);
+  // Streams the latest sample of every running container about every two seconds, for lists that show each
+  // container's usage; it shares its samples with EngineService.StreamUsage.
+  rpc WatchContainerStats(WatchContainerStatsRequest) returns (stream WatchContainerStatsResponse);
   // Runs a command in a running container and relays its input and output.
   rpc Exec(stream ExecRequest) returns (stream ExecResponse);
   // Creates a container from a local image and, when asked, starts it; fails with NOT_FOUND when the image is not
@@ -433,3 +436,11 @@ message RenameContainerRequest {
 }
 
 message RenameContainerResponse {}
+
+message WatchContainerStatsRequest {}
+
+message WatchContainerStatsResponse {
+  // Latest sample of each running container, by container ID; replaces the previous message's samples. A container
+  // appears once its first sample arrives.
+  map<string, ContainerStats> stats = 1;
+}

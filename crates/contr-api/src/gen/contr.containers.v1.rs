@@ -494,6 +494,18 @@ pub struct RenameContainerRequest {
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RenameContainerResponse {}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WatchContainerStatsRequest {}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct WatchContainerStatsResponse {
+    /// Latest sample of each running container, by container ID; replaces the previous message's samples. A container
+    /// appears once its first sample arrives.
+    #[prost(map = "string, message", tag = "1")]
+    pub stats: ::std::collections::HashMap<
+        ::prost::alloc::string::String,
+        ContainerStats,
+    >,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum ContainerState {
@@ -1068,6 +1080,37 @@ pub mod containers_service_client {
                 );
             self.inner.server_streaming(req, path, codec).await
         }
+        /// Streams the latest sample of every running container about every two seconds, for lists that show each
+        /// container's usage; it shares its samples with EngineService.StreamUsage.
+        pub async fn watch_container_stats(
+            &mut self,
+            request: impl tonic::IntoRequest<super::WatchContainerStatsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::WatchContainerStatsResponse>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.containers.v1.ContainersService/WatchContainerStats",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "contr.containers.v1.ContainersService",
+                        "WatchContainerStats",
+                    ),
+                );
+            self.inner.server_streaming(req, path, codec).await
+        }
         /// Runs a command in a running container and relays its input and output.
         pub async fn exec(
             &mut self,
@@ -1377,6 +1420,24 @@ pub mod containers_service_server {
             request: tonic::Request<super::StreamStatsRequest>,
         ) -> std::result::Result<
             tonic::Response<Self::StreamStatsStream>,
+            tonic::Status,
+        >;
+        /// Server streaming response type for the WatchContainerStats method.
+        type WatchContainerStatsStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<
+                    super::WatchContainerStatsResponse,
+                    tonic::Status,
+                >,
+            >
+            + std::marker::Send
+            + 'static;
+        /// Streams the latest sample of every running container about every two seconds, for lists that show each
+        /// container's usage; it shares its samples with EngineService.StreamUsage.
+        async fn watch_container_stats(
+            &self,
+            request: tonic::Request<super::WatchContainerStatsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<Self::WatchContainerStatsStream>,
             tonic::Status,
         >;
         /// Server streaming response type for the Exec method.
@@ -1920,6 +1981,57 @@ pub mod containers_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = StreamStatsSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.server_streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.containers.v1.ContainersService/WatchContainerStats" => {
+                    #[allow(non_camel_case_types)]
+                    struct WatchContainerStatsSvc<T: ContainersService>(pub Arc<T>);
+                    impl<
+                        T: ContainersService,
+                    > tonic::server::ServerStreamingService<
+                        super::WatchContainerStatsRequest,
+                    > for WatchContainerStatsSvc<T> {
+                        type Response = super::WatchContainerStatsResponse;
+                        type ResponseStream = T::WatchContainerStatsStream;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::ResponseStream>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::WatchContainerStatsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ContainersService>::watch_container_stats(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = WatchContainerStatsSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

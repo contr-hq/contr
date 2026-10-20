@@ -8,7 +8,7 @@ use contr_sdk::api::containers::v1::watch_containers_response::Event;
 use contr_sdk::api::containers::v1::{
     ContainerState, CreateContainerRequest, InspectContainerRequest, KillContainerRequest, PauseContainerRequest,
     PruneContainersRequest, RemoveContainerRequest, RenameContainerRequest, StopContainerRequest,
-    UnpauseContainerRequest, WatchContainersRequest,
+    UnpauseContainerRequest, WatchContainerStatsRequest, WatchContainersRequest,
 };
 use contr_sdk::api::daemon::v1::{BackendKind, Capability};
 use contr_sdk::api::diagnostics::v1::{CheckStatus, RunChecksRequest, RunRemediationRequest};
@@ -419,5 +419,42 @@ async fn checks_follow_the_engine_and_unknown_fixes_are_refused() {
         .unwrap_err();
     assert!(matches!(Error::from(refused), Error::NotFound(_)));
 
+    daemon.stop().await;
+}
+
+#[tokio::test]
+async fn container_stats_cover_every_running_container() {
+    let daemon = Daemon::start();
+    let client = daemon.client().await;
+    start_engine(&client).await;
+    let running: Vec<String> = client
+        .list_containers()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|container| container.state() == ContainerState::Running)
+        .map(|container| container.id)
+        .collect();
+
+    let mut samples = client
+        .containers()
+        .watch_container_stats(WatchContainerStatsRequest {})
+        .await
+        .unwrap()
+        .into_inner();
+    let stats = loop {
+        let stats = samples.message().await.unwrap().unwrap().stats;
+        if stats.len() == running.len() {
+            break stats;
+        }
+    };
+
+    for id in &running {
+        let sample = &stats[id];
+        assert!((sample.cpu_percent - 25.0).abs() < 0.01, "{}", sample.cpu_percent);
+        assert_eq!(sample.memory_usage_bytes, 52_428_800);
+    }
+
+    drop(samples);
     daemon.stop().await;
 }

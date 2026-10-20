@@ -1,5 +1,5 @@
-//! Resources the whole engine uses: the CPU and memory of its running containers, summed from one stats stream per
-//! container, and the disk its data takes. Sampling runs only while a watcher exists.
+//! Resources the engine and each running container use: one stats stream per running container, summed into the
+//! engine's totals, and the disk the engine's data takes. Sampling runs only while a watcher exists.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -25,21 +25,28 @@ pub(crate) type RunningIds = Arc<dyn Fn() -> Vec<String> + Send + Sync>;
 
 type Samples = Arc<Mutex<HashMap<String, ContainerStats>>>;
 
-/// The latest usage and whether a sampling task produces it.
+/// Usage at one moment: the engine's totals and the latest sample of each running container by ID.
+#[derive(Clone, Debug)]
+pub(crate) struct Sample {
+    pub(crate) engine: EngineUsage,
+    pub(crate) containers: Arc<HashMap<String, ContainerStats>>,
+}
+
+/// The latest sample and whether a sampling task produces it.
 #[derive(Default)]
 pub(crate) struct Usage {
-    latest: watch::Sender<Option<EngineUsage>>,
+    latest: watch::Sender<Option<Sample>>,
     sampling: Mutex<bool>,
 }
 
 impl Usage {
-    /// Usage every two seconds until `cancel` fires, starting the sampling task when none runs.
+    /// A sample every two seconds until `cancel` fires, starting the sampling task when none runs.
     pub(crate) fn watch(
         self: &Arc<Self>,
         engine: &Engine,
         running: RunningIds,
         cancel: CancellationToken,
-    ) -> BoxStream<'static, EngineUsage> {
+    ) -> BoxStream<'static, Sample> {
         let receiver = {
             let mut sampling = lock(&self.sampling);
             let receiver = self.latest.subscribe();
@@ -52,8 +59,8 @@ impl Usage {
 
         stream::unfold(receiver, |mut receiver| async move {
             receiver.changed().await.ok()?;
-            let usage = (*receiver.borrow_and_update())?;
-            Some((usage, receiver))
+            let sample = receiver.borrow_and_update().clone()?;
+            Some((sample, receiver))
         })
         .take_until(cancel.cancelled_owned())
         .boxed()
@@ -98,16 +105,20 @@ async fn sample(usage: Arc<Usage>, engine: Engine, running: RunningIds, cancel: 
                 .or_insert_with(|| tokio::spawn(follow(engine.clone(), id.clone(), Arc::clone(&samples))));
         }
 
-        let (cpu_percent, memory_used_bytes) = lock(&samples).values().fold((0.0, 0), |(cpu, memory), stats| {
+        let containers = Arc::new(lock(&samples).clone());
+        let (cpu_percent, memory_used_bytes) = containers.values().fold((0.0, 0), |(cpu, memory), stats| {
             (cpu + stats.cpu_percent, memory + stats.memory_usage_bytes)
         });
-        usage.latest.send_replace(Some(EngineUsage {
-            cpu_percent,
-            cpus,
-            memory_used_bytes,
-            memory_total_bytes,
-            disk_used_bytes: disk.load(Ordering::Relaxed),
-            running_containers: u32::try_from(ids.len()).unwrap_or(u32::MAX),
+        usage.latest.send_replace(Some(Sample {
+            engine: EngineUsage {
+                cpu_percent,
+                cpus,
+                memory_used_bytes,
+                memory_total_bytes,
+                disk_used_bytes: disk.load(Ordering::Relaxed),
+                running_containers: u32::try_from(ids.len()).unwrap_or(u32::MAX),
+            },
+            containers,
         }));
 
         let mut sampling = lock(&usage.sampling);

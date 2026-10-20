@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bollard::models::{EventMessage, EventMessageTypeEnum};
 use bollard::query_parameters::EventsOptions;
-use contr_api::containers::v1::{Container, ContainerState};
+use contr_api::containers::v1::{Container, ContainerState, ContainerStats};
 use contr_api::engine::v1::EngineUsage;
 use contr_api::images::v1::Image;
 use contr_api::networks::v1::Network;
@@ -19,7 +19,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::time::{self, Instant};
 use tokio_util::sync::CancellationToken;
 
-use crate::usage::{RunningIds, Usage};
+use crate::usage::{RunningIds, Sample, Usage};
 use crate::{Engine, EngineError};
 
 const CHANGE_QUEUE: usize = 256;
@@ -104,8 +104,20 @@ impl EngineCache {
     }
 
     /// The engine's resource usage about every two seconds; ends when the cache closes. Each container's stats are
-    /// streamed only while some usage stream is open.
+    /// streamed only while some usage or container stats stream is open.
     pub fn watch_usage(&self) -> BoxStream<'static, EngineUsage> {
+        self.samples().map(|sample| sample.engine).boxed()
+    }
+
+    /// The latest stats of each running container by ID, about every two seconds; ends when the cache closes. A
+    /// container appears once its first sample arrives.
+    pub fn watch_container_stats(&self) -> BoxStream<'static, HashMap<String, ContainerStats>> {
+        self.samples()
+            .map(|sample| Arc::unwrap_or_clone(sample.containers))
+            .boxed()
+    }
+
+    fn samples(&self) -> BoxStream<'static, Sample> {
         let containers = Arc::clone(&self.collections.containers);
         let running: RunningIds = Arc::new(move || {
             containers
