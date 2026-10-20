@@ -13,6 +13,9 @@ pub const ENGINE_SOCKET: &str = "/var/run/docker.sock";
 /// Directory inside the data guest that holds engine data.
 pub const DATA_SOURCE: &str = "/var/lib/contr-data";
 
+/// Directory under which WSL mounts each Windows drive in the runtime guest, as `/mnt/c`.
+pub const WINDOWS_DRIVES: &str = "/mnt";
+
 /// Mount point of the data guest's storage, shared by every distribution of the WSL 2 virtual machine.
 pub const DATA_MOUNT: &str = "/mnt/wsl/contr/data";
 

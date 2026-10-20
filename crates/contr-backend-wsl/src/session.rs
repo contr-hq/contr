@@ -1,11 +1,13 @@
 use std::io;
+use std::sync::Arc;
 use std::time::Duration;
 
 use contr_core::guest;
-use contr_mux::{Channel, MuxStream, Opener};
-use contr_transport::{Connection, Endpoint, Listener};
+use contr_engine_proxy::Rewrites;
+use contr_mux::{Channel, Opener};
+use contr_transport::{Endpoint, Listener};
 use futures_util::StreamExt;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::{Child, ChildStdout};
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{Instant, sleep, timeout};
@@ -123,6 +125,10 @@ impl Session {
 }
 
 fn relay(listener: Listener, opener: Opener) -> JoinHandle<()> {
+    let rewrites = Arc::new(Rewrites {
+        drives_root: guest::WINDOWS_DRIVES.to_owned(),
+        host_alias: true,
+    });
     tokio::spawn(async move {
         let mut incoming = listener.incoming();
         let mut connections = JoinSet::new();
@@ -131,37 +137,23 @@ fn relay(listener: Listener, opener: Opener) -> JoinHandle<()> {
                 accepted = incoming.next() => match accepted {
                     Some(Ok(client)) => {
                         let opener = opener.clone();
-                        connections.spawn(async move {
-                            match opener.open(Channel::Engine).await {
-                                Ok(engine) => relay_client(client, engine).await,
-                                Err(error) => tracing::warn!(%error, "cannot reach the engine"),
-                            }
-                        });
+                        let connect = move || {
+                            let opener = opener.clone();
+                            async move { opener.open(Channel::Engine).await.map_err(io::Error::other) }
+                        };
+                        connections.spawn(contr_engine_proxy::serve(client, connect, Arc::clone(&rewrites)));
                     }
                     Some(Err(error)) => tracing::warn!(%error, "cannot accept an engine pipe client"),
                     None => break,
                 },
-                Some(_) = connections.join_next(), if !connections.is_empty() => {}
+                Some(served) = connections.join_next(), if !connections.is_empty() => {
+                    if let Ok(Err(error)) = served {
+                        tracing::debug!(%error, "engine pipe client ended");
+                    }
+                }
             }
         }
     })
-}
-
-/// Relays one engine pipe client. Pipes cannot half-close, so in message mode an empty message ends a direction:
-/// the client's ends its writes, and one sent to it marks the end of the engine's output.
-async fn relay_client(client: Connection, engine: MuxStream) {
-    let (mut client_read, mut client_write) = tokio::io::split(client);
-    let (mut engine_read, mut engine_write) = tokio::io::split(engine);
-
-    let upstream = async {
-        let _ = tokio::io::copy(&mut client_read, &mut engine_write).await;
-        let _ = engine_write.shutdown().await;
-    };
-    let downstream = async {
-        let _ = tokio::io::copy(&mut engine_read, &mut client_write).await;
-        let _ = client_write.write(&[]).await;
-    };
-    tokio::join!(upstream, downstream);
 }
 
 fn forward_log(stderr: Option<impl AsyncRead + Unpin + Send + 'static>, distribution: &str) -> JoinHandle<()> {
