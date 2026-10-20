@@ -13,6 +13,7 @@ use tokio::process::{Child, Command};
 use tokio::signal::unix::{SignalKind, signal};
 
 use crate::mounts::is_mount_point;
+use crate::network;
 
 const DOCKERD: &str = "/usr/local/bin/dockerd";
 const LOG_DIR: &str = "/var/log/contr";
@@ -147,11 +148,16 @@ fn spawn_dockerd(data_root: &Path) -> anyhow::Result<Child> {
         .open(&log_path)
         .with_context(|| format!("cannot open {}", log_path.display()))?;
 
-    let child = Command::new(DOCKERD)
+    let mut command = Command::new(DOCKERD);
+    command
         .arg("--data-root")
         .arg(data_root)
         .arg("--host")
-        .arg(format!("unix://{}", guest::ENGINE_SOCKET))
+        .arg(format!("unix://{}", guest::ENGINE_SOCKET));
+    if let Some(gateway) = network::default_gateway() {
+        command.arg("--host-gateway-ip").arg(gateway.to_string());
+    }
+    let child = command
         .env("PATH", SEARCH_PATH)
         .stdin(Stdio::null())
         .stdout(log.try_clone()?)
