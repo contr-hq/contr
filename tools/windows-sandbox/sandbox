@@ -1,0 +1,458 @@
+#!/usr/bin/env bash
+# Creates and drives the Contr Windows 11 development VM through system libvirt. See README.md.
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+readonly SCRIPT_DIR
+readonly CONNECT=qemu:///system
+
+readonly NAME=${SANDBOX_NAME:-contr-win11}
+readonly MEMORY_GIB=${SANDBOX_MEMORY_GIB:-8}
+readonly VCPUS=${SANDBOX_VCPUS:-6}
+readonly DISK_GIB=${SANDBOX_DISK_GIB:-128}
+readonly POOL=${SANDBOX_POOL:-contr-sandbox}
+readonly NETWORK=${SANDBOX_NETWORK:-default}
+readonly MAC=${SANDBOX_MAC:-52:54:00:c0:11:01}
+readonly IP=${SANDBOX_IP:-192.168.122.211}
+readonly GUEST_USER=${SANDBOX_USER:-dev}
+readonly COMPUTER_NAME=${SANDBOX_COMPUTER_NAME:-CONTR-WIN11}
+readonly STATE_DIR=${SANDBOX_STATE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/contr-sandbox}
+readonly DOWNLOAD_DIR=${SANDBOX_DOWNLOAD_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/contr-sandbox/downloads}
+readonly WINDOWS_ISO=${SANDBOX_WINDOWS_ISO:-$DOWNLOAD_DIR/win11-enterprise-eval-26300.9457-en-us.iso}
+readonly VIRTIO_ISO=${SANDBOX_VIRTIO_ISO:-$DOWNLOAD_DIR/virtio-win-0.1.302.iso}
+
+readonly WINDOWS_VOLUME=windows.iso
+readonly VIRTIO_VOLUME=virtio-win.iso
+readonly UNATTEND_VOLUME=$NAME-unattend.iso
+readonly DISK_VOLUME=$NAME.qcow2
+readonly SSH_KEY=$STATE_DIR/id_ed25519
+readonly KNOWN_HOSTS=$STATE_DIR/known_hosts
+readonly PASSWORD_FILE=$STATE_DIR/password
+readonly GUEST_ROOT='C:\contr-sandbox'
+
+TEMPORARY_PATHS=()
+cleanup() { ((${#TEMPORARY_PATHS[@]} == 0)) || rm -rf -- "${TEMPORARY_PATHS[@]}"; }
+trap cleanup EXIT
+
+log() { printf '==> %s\n' "$*" >&2; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+virsh_() { virsh --connect "$CONNECT" --quiet "$@"; }
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") <command> [arguments]
+
+  create                 Build the VM and start the unattended Windows installation
+  wait [minutes]         Follow provisioning until it finishes (default 150 minutes), then eject install media
+  status                 Show VM state, provisioning progress and tool versions
+  start | stop           Boot or shut down the VM
+  ssh [command...]       Open a PowerShell session or run a command as $GUEST_USER
+  sync <dir> [guest-dir] Copy a git working tree into the VM (default C:/src/<name>), pruning deleted files
+  gui <program> [args]   Start a program on the interactive desktop
+  screenshot [file.png]  Save the VM display (default $STATE_DIR/screenshot.png)
+  console                Open the VM display in virt-manager
+  rdp                    Print Remote Desktop connection details
+  destroy [--purge] [--yes]
+                         Delete the VM and its disk; --purge also deletes ISOs, keys and the password
+
+Settings come from SANDBOX_* environment variables; see README.md.
+EOF
+}
+
+require() {
+    local tool
+    for tool in "$@"; do
+        command -v "$tool" >/dev/null || die "$tool is required"
+    done
+}
+
+render() {
+    local text
+    text=$(<"$1")
+    shift
+    local pair
+    for pair in "$@"; do
+        text=${text//"@${pair%%=*}@"/"${pair#*=}"}
+    done
+    [[ ! $text =~ @[A-Z_]+@ ]] || die "unresolved placeholder ${BASH_REMATCH[0]}"
+    printf '%s\n' "$text"
+}
+
+domain_exists() { virsh_ dominfo "$NAME" >/dev/null 2>&1; }
+domain_state() { virsh_ domstate "$NAME" 2>/dev/null || echo 'undefined'; }
+volume_exists() { virsh_ vol-info --pool "$POOL" "$1" >/dev/null 2>&1; }
+
+# Disks are attached by file path: virt-aa-helper grants AppArmor access to file disks, not to pool volumes.
+volume_path() { virsh_ vol-path --pool "$POOL" "$1"; }
+
+ssh_guest() {
+    local options=(-i "$SSH_KEY" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5
+        -o UserKnownHostsFile="$KNOWN_HOSTS" -o StrictHostKeyChecking=accept-new)
+    # Windows ships an OpenSSH without post-quantum key exchange; the link never leaves this host.
+    ssh -G -o WarnWeakCrypto=no-pq-kex localhost >/dev/null 2>&1 && options+=(-o WarnWeakCrypto=no-pq-kex)
+    # shellcheck disable=SC2029 # the caller's arguments are the destination and the remote command
+    ssh "${options[@]}" "$@"
+}
+
+run_guest() { ssh_guest "$GUEST_USER@$IP" "$@"; }
+
+pwsh_guest() {
+    local script encoded
+    script="\$ErrorActionPreference = 'Stop'; \$ProgressPreference = 'SilentlyContinue'"$'\n'"$1"
+    encoded=$(printf '%s' "$script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+    run_guest "pwsh -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand $encoded"
+}
+
+ps_quote() { printf "'%s'" "${1//\'/\'\'}"; }
+
+ensure_state() {
+    mkdir -p "$STATE_DIR" "$DOWNLOAD_DIR"
+    chmod 700 "$STATE_DIR"
+    [[ -f $SSH_KEY ]] || ssh-keygen -q -t ed25519 -N '' -C "contr-sandbox@$NAME" -f "$SSH_KEY"
+    if [[ ! -f $PASSWORD_FILE ]]; then
+        local password=''
+        until ((${#password} == 24)) && [[ $password =~ [A-Z] && $password =~ [a-z] && $password =~ [0-9] ]]; do
+            password=$(LC_ALL=C tr -dc 'A-Za-z0-9' < <(head -c 1024 /dev/urandom))
+            password=${password:0:24}
+        done
+        (umask 077 && printf '%s\n' "$password" >"$PASSWORD_FILE")
+    fi
+}
+
+ensure_pool() {
+    virsh_ pool-info "$POOL" >/dev/null 2>&1 && return
+    log "creating storage pool $POOL"
+    virsh_ pool-define-as "$POOL" dir --target "/var/lib/libvirt/images/$POOL" >/dev/null
+    virsh_ pool-build "$POOL" >/dev/null
+    virsh_ pool-start "$POOL" >/dev/null
+    virsh_ pool-autostart "$POOL" >/dev/null
+}
+
+qemu_owner() {
+    virsh_ capabilities |
+        sed -n "s|.*<baselabel type='kvm'>+\([0-9]*\):+\([0-9]*\)</baselabel>.*|\1 \2|p" |
+        head -n 1
+}
+
+# Volumes are created owned by QEMU's user because libvirt does not relabel them on every distribution.
+create_volume() {
+    local name=$1 capacity=$2 format=$3 mode=$4 owner group
+    read -r owner group < <(qemu_owner)
+    [[ -n $owner && -n $group ]] || die "libvirt capabilities name no QEMU user"
+    virsh_ vol-create "$POOL" /dev/stdin >/dev/null <<XML
+<volume>
+  <name>$name</name>
+  <capacity unit='bytes'>$capacity</capacity>
+  <target>
+    <format type='$format'/>
+    <permissions><owner>$owner</owner><group>$group</group><mode>$mode</mode></permissions>
+  </target>
+</volume>
+XML
+}
+
+upload_volume() {
+    local volume=$1 file=$2
+    [[ -f $file ]] || die "$file not found; download it or set the matching SANDBOX_*_ISO variable"
+    log "uploading $(basename "$file") to $POOL/$volume"
+    create_volume "$volume" "$(stat -c %s "$file")" raw 0440
+    virsh_ vol-upload --pool "$POOL" "$volume" "$file"
+}
+
+timezone() {
+    timedatectl show --property=Timezone --value 2>/dev/null || echo 'UTC'
+}
+
+driver_paths() {
+    local key=1 letter driver
+    for letter in D E F G H I J; do
+        for driver in viostor NetKVM; do
+            printf '        <PathAndCredentials wcm:action="add" wcm:keyValue="%d">' "$key"
+            printf '<Path>%s:\\%s\\w11\\amd64</Path></PathAndCredentials>\n' "$letter" "$driver"
+            key=$((key + 1))
+        done
+    done
+}
+
+build_unattend_iso() {
+    local stage=$STATE_DIR/build/unattend
+    rm -rf "$stage"
+    mkdir -p "$stage"
+
+    render "$SCRIPT_DIR/autounattend.xml.in" \
+        "USER=$GUEST_USER" "PASSWORD=$(<"$PASSWORD_FILE")" "COMPUTER_NAME=$COMPUTER_NAME" \
+        "DRIVER_PATHS=$(driver_paths)" >"$stage/autounattend.xml"
+    cp "$SCRIPT_DIR/guest/bootstrap.ps1" "$SCRIPT_DIR/guest/provision.ps1" "$stage/"
+    jq -n --arg user "$GUEST_USER" --arg timeZone "$(timezone)" --arg key "$(<"$SSH_KEY.pub")" \
+        '{user: $user, timeZone: $timeZone, authorizedKey: $key}' >"$stage/contr-sandbox.json"
+
+    local iso=$STATE_DIR/build/unattend.iso
+    xorriso -as mkisofs -quiet -V CONTR_UNATTEND -J -joliet-long -r -o "$iso" "$stage"
+    rm -rf "$stage"
+
+    volume_exists "$UNATTEND_VOLUME" && virsh_ vol-delete --pool "$POOL" "$UNATTEND_VOLUME" >/dev/null
+    upload_volume "$UNATTEND_VOLUME" "$iso"
+    rm -f "$iso"
+}
+
+ensure_dhcp_reservation() {
+    virsh_ net-dumpxml "$NETWORK" | grep -q "mac='$MAC'" && return
+    virsh_ net-update "$NETWORK" add-last ip-dhcp-host \
+        "<host mac='$MAC' name='$NAME' ip='$IP'/>" --live --config >/dev/null
+}
+
+press_boot_key() {
+    local _
+    for _ in $(seq 30); do
+        sleep 1
+        virsh_ send-key "$NAME" KEY_ENTER >/dev/null 2>&1 || true
+    done
+}
+
+cmd_create() {
+    require virsh xorriso jq ssh-keygen iconv
+    domain_exists && die "$NAME already exists; run 'destroy' first"
+    [[ $(cat /sys/module/kvm_amd/parameters/nested /sys/module/kvm_intel/parameters/nested 2>/dev/null) == *[1Y]* ]] ||
+        die "nested virtualization is disabled in KVM; WSL 2 inside the VM needs it"
+
+    ensure_state
+    ensure_pool
+    volume_exists "$WINDOWS_VOLUME" || upload_volume "$WINDOWS_VOLUME" "$WINDOWS_ISO"
+    volume_exists "$VIRTIO_VOLUME" || upload_volume "$VIRTIO_VOLUME" "$VIRTIO_ISO"
+    build_unattend_iso
+
+    log "creating ${DISK_GIB} GiB disk"
+    volume_exists "$DISK_VOLUME" && virsh_ vol-delete --pool "$POOL" "$DISK_VOLUME" >/dev/null
+    create_volume "$DISK_VOLUME" $((DISK_GIB * 1024 * 1024 * 1024)) qcow2 0660
+
+    ensure_dhcp_reservation
+    local domain_xml=$STATE_DIR/build/domain.xml
+    render "$SCRIPT_DIR/domain.xml.in" \
+        "NAME=$NAME" "MEMORY_GIB=$MEMORY_GIB" "VCPUS=$VCPUS" "CORES=$((VCPUS / 2))" \
+        "DISK_PATH=$(volume_path "$DISK_VOLUME")" "WINDOWS_ISO_PATH=$(volume_path "$WINDOWS_VOLUME")" \
+        "VIRTIO_ISO_PATH=$(volume_path "$VIRTIO_VOLUME")" "UNATTEND_ISO_PATH=$(volume_path "$UNATTEND_VOLUME")" \
+        "NETWORK=$NETWORK" "MAC=$MAC" >"$domain_xml"
+    virsh_ define "$domain_xml" >/dev/null
+
+    rm -f "$KNOWN_HOSTS"
+    log "starting $NAME; Windows Setup runs unattended"
+    virsh_ start "$NAME" >/dev/null
+    press_boot_key
+    log "installation started; follow it with '$(basename "$0") wait' or watch it with '$(basename "$0") console'"
+}
+
+agent_run() {
+    local request pid result _
+    request=$(jq -nc --arg command "$1" \
+        '{execute: "guest-exec", arguments: {path: "cmd.exe", arg: ["/c", $command], "capture-output": true}}')
+    pid=$(virsh_ qemu-agent-command "$NAME" "$request" 2>/dev/null | jq -r .return.pid) || return 1
+    for _ in $(seq 40); do
+        result=$(virsh_ qemu-agent-command "$NAME" \
+            "{\"execute\": \"guest-exec-status\", \"arguments\": {\"pid\": $pid}}" 2>/dev/null) || return 1
+        if [[ $(jq -r .return.exited <<<"$result") == "true" ]]; then
+            jq -r '.return["out-data"] // "" | @base64d' <<<"$result"
+            return 0
+        fi
+        sleep 0.5
+    done
+    return 1
+}
+
+# The guest agent arrives in the first provisioning step, long before sshd.
+read_guest_file() {
+    { run_guest "type $1" 2>/dev/null || agent_run "type $1"; } | tr -d '\r'
+}
+
+guest_status() { read_guest_file "$GUEST_ROOT\\status.json"; }
+
+finalize() {
+    log "ejecting installation media"
+    local target
+    for target in sda sdb sdc; do
+        virsh_ change-media "$NAME" "$target" --eject --live --config >/dev/null 2>&1 || true
+    done
+    volume_exists "$UNATTEND_VOLUME" && virsh_ vol-delete --pool "$POOL" "$UNATTEND_VOLUME" >/dev/null
+    cmd_status
+}
+
+cmd_wait() {
+    require jq
+    local deadline=$((SECONDS + ${1:-150} * 60)) last='' current status
+    while ((SECONDS < deadline)); do
+        if status=$(guest_status) && [[ -n $status ]]; then
+            current=$(jq -r '"\(.state): \(.step) \(.message)"' <<<"$status")
+            [[ $current == "$last" ]] || log "$current"
+            last=$current
+            case $(jq -r .state <<<"$status") in
+            done) finalize && return 0 ;;
+            failed)
+                read_guest_file "$GUEST_ROOT\\provision.log" | tail -n 40 || true
+                die "provisioning failed; the log above is from $GUEST_ROOT\\provision.log"
+                ;;
+            esac
+        else
+            current="waiting for the guest to report (VM $(domain_state))"
+            [[ $current == "$last" ]] || log "$current"
+            last=$current
+        fi
+        sleep 20
+    done
+    die "provisioning did not finish in time; inspect it with '$(basename "$0") screenshot' or 'console'"
+}
+
+cmd_status() {
+    printf 'VM:        %s (%s)\n' "$NAME" "$(domain_state)"
+    printf 'Address:   %s\n' "$IP"
+    if run_guest exit 2>/dev/null; then
+        printf 'SSH:       %s@%s\n' "$GUEST_USER" "$IP"
+    else
+        printf 'SSH:       unreachable\n'
+    fi
+    local status
+    status=$(guest_status) && [[ -n $status ]] || return 0
+    jq -r '"Provision: \(.state) (\(.step)) \(.message)"' <<<"$status"
+    if [[ $(jq -r .state <<<"$status") == "done" ]]; then
+        read_guest_file "$GUEST_ROOT\\versions.json" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
+    fi
+}
+
+cmd_start() {
+    [[ $(domain_state) == running ]] && return
+    virsh_ start "$NAME" >/dev/null
+    log "$NAME started"
+}
+
+cmd_stop() {
+    [[ $(domain_state) == running ]] || return 0
+    virsh_ shutdown "$NAME" >/dev/null
+    local _
+    for _ in $(seq 120); do
+        [[ $(domain_state) == running ]] || { log "$NAME is shut off"; return 0; }
+        sleep 1
+    done
+    die "$NAME did not shut down in 2 minutes; 'virsh --connect $CONNECT destroy $NAME' forces it off"
+}
+
+cmd_ssh() {
+    if (($# == 0)); then
+        ssh_guest -t "$GUEST_USER@$IP"
+    else
+        run_guest "$*"
+    fi
+}
+
+cmd_sync() {
+    local source=${1:?usage: sync <directory> [guest-directory]}
+    source=$(cd "$source" && pwd)
+    git -C "$source" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "$source is not a git working tree"
+    local target=${2:-C:/src/$(basename "$source")}
+
+    local work list manifest
+    work=$(mktemp -d)
+    TEMPORARY_PATHS+=("$work")
+    list=$work/files
+    manifest=$work/.contr-sandbox-manifest
+
+    local file
+    while IFS= read -r -d '' file; do
+        [[ -f $source/$file ]] && printf '%s\0' "$file"
+    done < <(git -C "$source" ls-files -z --cached --others --exclude-standard) >"$list"
+    tr '\0' '\n' <"$list" >"$manifest"
+
+    log "syncing $(wc -l <"$manifest") files to $target"
+    pwsh_guest "New-Item -ItemType Directory -Force -Path $(ps_quote "$target") | Out-Null"
+    tar -cf - -C "$source" --null --files-from="$list" -C "$work" .contr-sandbox-manifest |
+        run_guest "tar -xf - -C $(ps_quote "$target")"
+    pwsh_guest "$(render "$SCRIPT_DIR/guest/prune.ps1" "ROOT=$(ps_quote "$target")")"
+}
+
+cmd_gui() {
+    local program=${1:?usage: gui <program> [arguments]}
+    shift
+    pwsh_guest "
+\$action = @{ Execute = $(ps_quote "$program") }
+if ($(ps_quote "$*")) { \$action.Argument = $(ps_quote "$*") }
+\$action = New-ScheduledTaskAction @action
+\$principal = New-ScheduledTaskPrincipal -UserId $(ps_quote "$GUEST_USER") -LogonType Interactive -RunLevel Limited
+Register-ScheduledTask -TaskName 'ContrSandboxGui' -Action \$action -Principal \$principal -Force | Out-Null
+Start-ScheduledTask -TaskName 'ContrSandboxGui'"
+}
+
+cmd_screenshot() {
+    require python3
+    local output=${1:-$STATE_DIR/screenshot.png} raw
+    raw=$(mktemp)
+    TEMPORARY_PATHS+=("$raw")
+    virsh_ screenshot "$NAME" --file "$raw" >/dev/null
+    python3 -I "$SCRIPT_DIR/ppm2png.py" "$raw" "$output"
+    printf '%s\n' "$output"
+}
+
+cmd_console() {
+    require virt-manager
+    virt-manager --connect "$CONNECT" --show-domain-console "$NAME" >/dev/null 2>&1 &
+    disown
+}
+
+cmd_rdp() {
+    printf 'Address:  %s:3389\nUser:     %s\nPassword: stored in %s\n' "$IP" "$GUEST_USER" "$PASSWORD_FILE"
+}
+
+cmd_destroy() {
+    local purge=false yes=false argument
+    for argument in "$@"; do
+        case $argument in
+        --purge) purge=true ;;
+        --yes) yes=true ;;
+        *) die "unknown option $argument" ;;
+        esac
+    done
+    if ! $yes; then
+        [[ -t 0 ]] || die "pass --yes to destroy $NAME non-interactively"
+        local answer
+        read -r -p "Delete $NAME and its disk$($purge && echo ', ISOs, keys and password')? [y/N] " answer
+        [[ $answer == [yY] ]] || return 1
+    fi
+
+    if domain_exists; then
+        [[ $(domain_state) == running ]] && virsh_ destroy "$NAME" >/dev/null
+        virsh_ undefine "$NAME" --nvram --tpm >/dev/null
+    fi
+    local volume
+    for volume in "$DISK_VOLUME" "$UNATTEND_VOLUME"; do
+        volume_exists "$volume" && virsh_ vol-delete --pool "$POOL" "$volume" >/dev/null
+    done
+    virsh_ net-update "$NETWORK" delete ip-dhcp-host "<host mac='$MAC' name='$NAME' ip='$IP'/>" \
+        --live --config >/dev/null 2>&1 || true
+    rm -f "$KNOWN_HOSTS"
+
+    if $purge; then
+        for volume in "$WINDOWS_VOLUME" "$VIRTIO_VOLUME"; do
+            volume_exists "$volume" && virsh_ vol-delete --pool "$POOL" "$volume" >/dev/null
+        done
+        if virsh_ pool-info "$POOL" >/dev/null 2>&1; then
+            virsh_ pool-destroy "$POOL" >/dev/null
+            virsh_ pool-delete "$POOL" >/dev/null
+            virsh_ pool-undefine "$POOL" >/dev/null
+        fi
+        rm -rf "$STATE_DIR"
+    fi
+    log "$NAME destroyed"
+}
+
+main() {
+    local command=${1:-help}
+    (($# > 0)) && shift
+    case $command in
+    create | wait | status | start | stop | ssh | sync | gui | screenshot | console | rdp | destroy)
+        "cmd_$command" "$@"
+        ;;
+    help | -h | --help) usage ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+    esac
+}
+
+main "$@"

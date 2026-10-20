@@ -61,6 +61,25 @@ jobs:
       - run: target/debug/contr-sdkgen verify --lang csharp --sdk target/sdk/csharp --daemon target/debug/contrd
       - run: dotnet build target/sdk/csharp/samples/ListContainers --configuration Release
 
+  tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: shellcheck tools/windows-sandbox/sandbox
+      - name: XML templates are well-formed
+        run: python3 -c 'import sys, xml.etree.ElementTree as et; [et.parse(f) for f in sys.argv[1:]]' tools/windows-sandbox/*.xml.in
+      - run: python3 -m py_compile tools/windows-sandbox/ppm2png.py
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
+              Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force
+          }
+          $findings = Invoke-ScriptAnalyzer -Path tools/windows-sandbox/guest -Recurse `
+              -Settings tools/windows-sandbox/PSScriptAnalyzerSettings.psd1
+          $findings | Format-Table -AutoSize -Wrap RuleName, ScriptName, Line, Message
+          if ($findings) { exit 1 }
+
   deny:
     runs-on: ubuntu-latest
     steps:
