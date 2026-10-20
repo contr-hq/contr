@@ -40,7 +40,7 @@ RUN set -eu; \
 
 FROM ${ALPINE} AS runtime
 ARG CONTR_RELEASE
-RUN apk add --no-cache ca-certificates iptables ip6tables pigz \
+RUN apk add --no-cache ca-certificates iptables ip6tables nftables pigz \
     && printf '%s\n' "$CONTR_RELEASE" > /etc/contr-release
 COPY --from=engine /out/ /usr/local/
 COPY --from=agent /out/contr-agent /usr/local/bin/contr-agent
