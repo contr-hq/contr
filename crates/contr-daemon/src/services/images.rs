@@ -72,6 +72,20 @@ impl ImagesService for ImagesApi {
         Ok(Response::new(response))
     }
 
+    async fn inspect_image(
+        &self,
+        request: Request<proto::InspectImageRequest>,
+    ) -> Result<Response<proto::InspectImageResponse>, Status> {
+        let handle = self.0.slot.get().await?;
+        let response = handle
+            .engine
+            .inspect_image(&request.into_inner().reference)
+            .await
+            .map_err(status::from_engine)?;
+
+        Ok(Response::new(response))
+    }
+
     async fn prune_images(
         &self,
         request: Request<proto::PruneImagesRequest>,

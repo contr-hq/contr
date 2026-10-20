@@ -136,6 +136,55 @@ pub struct PruneImagesResponse {
     #[prost(uint64, tag = "2")]
     pub reclaimed_bytes: u64,
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InspectImageRequest {
+    /// Reference such as "nginx:1.27-alpine", an ID or a unique ID prefix.
+    #[prost(string, tag = "1")]
+    pub reference: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct InspectImageResponse {
+    /// Containers is -1: inspection does not count them.
+    #[prost(message, optional, tag = "1")]
+    pub image: ::core::option::Option<Image>,
+    #[prost(message, optional, tag = "2")]
+    pub details: ::core::option::Option<ImageDetails>,
+    /// Body of the engine's GET /images/{name}/json response.
+    #[prost(string, tag = "3")]
+    pub raw_json: ::prost::alloc::string::String,
+}
+/// Image fields that only inspection returns.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ImageDetails {
+    /// Container ports the image declares, such as "80/tcp".
+    #[prost(string, repeated, tag = "1")]
+    pub exposed_ports: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// VAR=value entries.
+    #[prost(string, repeated, tag = "2")]
+    pub env: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag = "3")]
+    pub command: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag = "4")]
+    pub entrypoint: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, tag = "5")]
+    pub working_dir: ::prost::alloc::string::String,
+    #[prost(string, tag = "6")]
+    pub user: ::prost::alloc::string::String,
+    /// Such as "linux".
+    #[prost(string, tag = "7")]
+    pub os: ::prost::alloc::string::String,
+    /// Such as "amd64" or "arm64".
+    #[prost(string, tag = "8")]
+    pub architecture: ::prost::alloc::string::String,
+    #[prost(string, tag = "9")]
+    pub variant: ::prost::alloc::string::String,
+    /// Paths the image declares as volumes; a container gets an anonymous volume at each unless something else is
+    /// mounted there.
+    #[prost(string, repeated, tag = "10")]
+    pub volumes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(uint32, tag = "11")]
+    pub layer_count: u32,
+}
 /// Generated client implementations.
 #[cfg(feature = "client")]
 pub mod images_service_client {
@@ -343,6 +392,33 @@ pub mod images_service_client {
                 .insert(GrpcMethod::new("contr.images.v1.ImagesService", "PruneImages"));
             self.inner.unary(req, path, codec).await
         }
+        /// Returns what a local image runs and declares; fails with NOT_FOUND when the image is not local.
+        pub async fn inspect_image(
+            &mut self,
+            request: impl tonic::IntoRequest<super::InspectImageRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::InspectImageResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.images.v1.ImagesService/InspectImage",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("contr.images.v1.ImagesService", "InspectImage"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -406,6 +482,14 @@ pub mod images_service_server {
             request: tonic::Request<super::PruneImagesRequest>,
         ) -> std::result::Result<
             tonic::Response<super::PruneImagesResponse>,
+            tonic::Status,
+        >;
+        /// Returns what a local image runs and declares; fails with NOT_FOUND when the image is not local.
+        async fn inspect_image(
+            &self,
+            request: tonic::Request<super::InspectImageRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::InspectImageResponse>,
             tonic::Status,
         >;
     }
@@ -698,6 +782,51 @@ pub mod images_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = PruneImagesSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.images.v1.ImagesService/InspectImage" => {
+                    #[allow(non_camel_case_types)]
+                    struct InspectImageSvc<T: ImagesService>(pub Arc<T>);
+                    impl<
+                        T: ImagesService,
+                    > tonic::server::UnaryService<super::InspectImageRequest>
+                    for InspectImageSvc<T> {
+                        type Response = super::InspectImageResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::InspectImageRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ImagesService>::inspect_image(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = InspectImageSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

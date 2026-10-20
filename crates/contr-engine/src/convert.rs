@@ -191,6 +191,46 @@ pub(crate) fn image(summary: docker::ImageSummary) -> images::Image {
     }
 }
 
+/// Summary and details of an inspected image; the engine does not count its containers there.
+pub(crate) fn image_inspect(inspect: docker::ImageInspect) -> (images::Image, images::ImageDetails) {
+    let config = inspect.config.unwrap_or_default();
+    let sorted = |values: Option<Vec<String>>| {
+        let mut values = values.unwrap_or_default();
+        values.sort();
+        values
+    };
+    let image = images::Image {
+        id: inspect.id.unwrap_or_default(),
+        repo_tags: inspect.repo_tags.unwrap_or_default(),
+        repo_digests: inspect.repo_digests.unwrap_or_default(),
+        created_at: inspect.created.as_deref().and_then(rfc3339),
+        size_bytes: inspect
+            .size
+            .and_then(|size| u64::try_from(size).ok())
+            .unwrap_or_default(),
+        labels: config.labels.clone().unwrap_or_default(),
+        containers: -1,
+    };
+    let details = images::ImageDetails {
+        exposed_ports: sorted(config.exposed_ports),
+        env: config.env.unwrap_or_default(),
+        command: config.cmd.unwrap_or_default(),
+        entrypoint: config.entrypoint.unwrap_or_default(),
+        working_dir: config.working_dir.unwrap_or_default(),
+        user: config.user.unwrap_or_default(),
+        os: inspect.os.unwrap_or_default(),
+        architecture: inspect.architecture.unwrap_or_default(),
+        variant: inspect.variant.unwrap_or_default(),
+        volumes: sorted(config.volumes),
+        layer_count: inspect
+            .root_fs
+            .and_then(|root| root.layers)
+            .map_or(0, |layers| u32::try_from(layers.len()).unwrap_or(u32::MAX)),
+    };
+
+    (image, details)
+}
+
 pub(crate) fn volume(volume: docker::Volume) -> volumes::Volume {
     let scope = match volume.scope {
         Some(docker::VolumeScopeEnum::LOCAL) => volumes::VolumeScope::Local,

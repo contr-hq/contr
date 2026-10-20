@@ -2,12 +2,13 @@ syntax = "proto3";
 
 package contr.networks.v1;
 
+import "contr/containers/v1/containers.proto";
 import "google/protobuf/timestamp.proto";
 
 option csharp_namespace = "Contr.Sdk.Networks.V1";
 
-// Networks of the running engine. Network arguments accept an ID, a unique ID prefix or a name; every RPC fails with
-// ENGINE_NOT_RUNNING while the engine is not running.
+// Networks of the running engine and ports of this computer. Network arguments accept an ID, a unique ID prefix or a
+// name; every RPC except CheckHostPorts fails with ENGINE_NOT_RUNNING while the engine is not running.
 service NetworksService {
   // Returns every network.
   rpc ListNetworks(ListNetworksRequest) returns (ListNetworksResponse);
@@ -21,6 +22,9 @@ service NetworksService {
   rpc RemoveNetwork(RemoveNetworkRequest) returns (RemoveNetworkResponse);
   // Deletes user-defined networks no container is connected to.
   rpc PruneNetworks(PruneNetworksRequest) returns (PruneNetworksResponse);
+  // Reports which of the given ports a program on this computer already holds, so clients can warn before
+  // publishing them.
+  rpc CheckHostPorts(CheckHostPortsRequest) returns (CheckHostPortsResponse);
 }
 
 // Network containers attach to.
@@ -110,4 +114,26 @@ message PruneNetworksRequest {}
 
 message PruneNetworksResponse {
   repeated string deleted = 1;
+}
+
+message CheckHostPortsRequest {
+  repeated HostPort ports = 1;
+}
+
+// A port of this computer.
+message HostPort {
+  uint32 port = 1;
+  // TCP when unspecified; SCTP ports are never reported in use.
+  contr.containers.v1.Protocol protocol = 2;
+}
+
+message CheckHostPortsResponse {
+  // In request order.
+  repeated HostPortStatus ports = 1;
+}
+
+message HostPortStatus {
+  HostPort port = 1;
+  // A program on this computer holds the port, so publishing it fails or does not answer on localhost.
+  bool in_use = 2;
 }

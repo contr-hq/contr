@@ -4,7 +4,8 @@ use bollard::models::CreateImageInfo;
 use bollard::query_parameters::{CreateImageOptions, ListImagesOptions, PruneImagesOptions, RemoveImageOptions};
 use contr_api::images::v1::pull_image_response::Event;
 use contr_api::images::v1::{
-    Image, LayerProgress, PruneImagesResponse, PullImageResponse, PulledImage, RemoveImageResponse,
+    Image, InspectImageResponse, LayerProgress, PruneImagesResponse, PullImageResponse, PulledImage,
+    RemoveImageResponse,
 };
 use futures_util::{Stream, StreamExt};
 
@@ -15,6 +16,19 @@ impl Engine {
     pub async fn list_images(&self) -> Result<Vec<Image>, EngineError> {
         let images = self.docker().list_images(None::<ListImagesOptions>).await?;
         Ok(images.into_iter().map(convert::image).collect())
+    }
+
+    /// Summary, details and the inspect document of one local image.
+    pub async fn inspect_image(&self, reference: &str) -> Result<InspectImageResponse, EngineError> {
+        let inspect = self.docker().inspect_image(reference).await?;
+        let raw_json = serde_json::to_string(&inspect).map_err(|error| EngineError::Engine(error.to_string()))?;
+        let (image, details) = convert::image_inspect(inspect);
+
+        Ok(InspectImageResponse {
+            image: Some(image),
+            details: Some(details),
+            raw_json,
+        })
     }
 
     /// Pulls `reference`, adding the `latest` tag when it names neither tag nor digest; dropping the stream cancels

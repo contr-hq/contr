@@ -18,6 +18,8 @@ service ImagesService {
   rpc RemoveImage(RemoveImageRequest) returns (RemoveImageResponse);
   // Deletes images no container uses.
   rpc PruneImages(PruneImagesRequest) returns (PruneImagesResponse);
+  // Returns what a local image runs and declares; fails with NOT_FOUND when the image is not local.
+  rpc InspectImage(InspectImageRequest) returns (InspectImageResponse);
 }
 
 // Image in the local store.
@@ -109,4 +111,38 @@ message PruneImagesRequest {
 message PruneImagesResponse {
   repeated string deleted = 1;
   uint64 reclaimed_bytes = 2;
+}
+
+message InspectImageRequest {
+  // Reference such as "nginx:1.27-alpine", an ID or a unique ID prefix.
+  string reference = 1;
+}
+
+message InspectImageResponse {
+  // Containers is -1: inspection does not count them.
+  Image image = 1;
+  ImageDetails details = 2;
+  // Body of the engine's GET /images/{name}/json response.
+  string raw_json = 3;
+}
+
+// Image fields that only inspection returns.
+message ImageDetails {
+  // Container ports the image declares, such as "80/tcp".
+  repeated string exposed_ports = 1;
+  // VAR=value entries.
+  repeated string env = 2;
+  repeated string command = 3;
+  repeated string entrypoint = 4;
+  string working_dir = 5;
+  string user = 6;
+  // Such as "linux".
+  string os = 7;
+  // Such as "amd64" or "arm64".
+  string architecture = 8;
+  string variant = 9;
+  // Paths the image declares as volumes; a container gets an anonymous volume at each unless something else is
+  // mounted there.
+  repeated string volumes = 10;
+  uint32 layer_count = 11;
 }
