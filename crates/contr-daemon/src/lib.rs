@@ -30,6 +30,9 @@ use crate::slot::{DockerContext, EngineSlot};
 pub enum BackendChoice {
     /// The engine installed on the Linux host.
     Host,
+    /// Contr's own WSL 2 distributions.
+    #[cfg(windows)]
+    Wsl,
     /// A fake engine serving fixtures.
     #[cfg(feature = "fake")]
     Fake,
@@ -45,6 +48,8 @@ pub struct Config {
     pub engine_socket: Option<PathBuf>,
     /// Fixture file for the fake backend instead of the built-in set.
     pub fixtures: Option<PathBuf>,
+    /// Directory holding the guest images and their manifest for the WSL backend.
+    pub guest_dir: Option<PathBuf>,
     /// Keeps the Docker CLI context pointed at the running engine.
     pub docker_context: bool,
 }
@@ -57,6 +62,12 @@ pub enum DaemonError {
     Serve(#[from] tonic::transport::Error),
     #[error("the {0} backend is not available on this platform")]
     UnsupportedBackend(&'static str),
+    #[error("cannot set up the {backend} backend")]
+    Backend {
+        backend: &'static str,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("cannot load fixtures from {}", path.display())]
     Fixtures {
         path: PathBuf,
@@ -124,6 +135,8 @@ fn bind(listen: Option<&Endpoint>) -> Result<Listener, DaemonError> {
 fn backend(config: &Config) -> Result<Arc<dyn Backend>, DaemonError> {
     match config.backend {
         BackendChoice::Host => host_backend(config.engine_socket.clone()),
+        #[cfg(windows)]
+        BackendChoice::Wsl => wsl_backend(config.guest_dir.clone()),
         #[cfg(feature = "fake")]
         BackendChoice::Fake => {
             let fixtures = match &config.fixtures {
@@ -150,6 +163,21 @@ fn host_backend(engine_socket: Option<PathBuf>) -> Result<Arc<dyn Backend>, Daem
 #[cfg(not(target_os = "linux"))]
 fn host_backend(_engine_socket: Option<PathBuf>) -> Result<Arc<dyn Backend>, DaemonError> {
     Err(DaemonError::UnsupportedBackend("host"))
+}
+
+#[cfg(windows)]
+fn wsl_backend(guest_dir: Option<PathBuf>) -> Result<Arc<dyn Backend>, DaemonError> {
+    let setup = |source| DaemonError::Backend { backend: "wsl", source };
+    let guest_dir = match guest_dir {
+        Some(dir) => dir,
+        None => std::env::current_exe()
+            .map_err(setup)?
+            .parent()
+            .map(|dir| dir.join("guest"))
+            .ok_or_else(|| setup(std::io::Error::other("contrd has no parent directory")))?,
+    };
+
+    Ok(Arc::new(contr_backend_wsl::WslBackend::new(guest_dir).map_err(setup)?))
 }
 
 fn docker_context(config: &Config, kind: BackendKind) -> Option<DockerContext> {

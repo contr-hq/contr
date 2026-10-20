@@ -43,6 +43,7 @@ impl Daemon {
             listen: Some(endpoint.clone()),
             engine_socket: None,
             fixtures: None,
+            guest_dir: None,
             docker_context: false,
         };
         let (shutdown, signal) = oneshot::channel();

@@ -21,3 +21,8 @@ resets.
 
 - Only installing WSL itself needs elevation.
 - Users see two extra entries in `wsl -l`; `wsl --shutdown` stops the engine and the daemon must recover.
+- Named pipes cannot half-close, so the engine pipe runs in message mode and an empty message ends a direction, the
+  convention Docker clients on Windows follow.
+- Measured in the nested Windows sandbox: `wsl.exe` standard streams carry about 49 MiB/s, and the relay delivers
+  11–17 MiB/s of container output. Large transfers (`docker load`, big build contexts) are the case for Hyper-V
+  sockets.
