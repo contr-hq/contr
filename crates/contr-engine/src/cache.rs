@@ -7,7 +7,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bollard::models::{EventMessage, EventMessageTypeEnum};
 use bollard::query_parameters::EventsOptions;
-use contr_api::containers::v1::Container;
+use contr_api::containers::v1::{Container, ContainerState};
+use contr_api::engine::v1::EngineUsage;
 use contr_api::images::v1::Image;
 use contr_api::networks::v1::Network;
 use contr_api::volumes::v1::Volume;
@@ -18,6 +19,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::time::{self, Instant};
 use tokio_util::sync::CancellationToken;
 
+use crate::usage::{RunningIds, Usage};
 use crate::{Engine, EngineError};
 
 const CHANGE_QUEUE: usize = 256;
@@ -79,6 +81,7 @@ impl Keyed for Network {
 pub struct EngineCache {
     engine: Engine,
     collections: Collections,
+    usage: Arc<Usage>,
     cancel: CancellationToken,
 }
 
@@ -95,8 +98,25 @@ impl EngineCache {
         Ok(Self {
             engine,
             collections,
+            usage: Arc::default(),
             cancel,
         })
+    }
+
+    /// The engine's resource usage about every two seconds; ends when the cache closes. Each container's stats are
+    /// streamed only while some usage stream is open.
+    pub fn watch_usage(&self) -> BoxStream<'static, EngineUsage> {
+        let containers = Arc::clone(&self.collections.containers);
+        let running: RunningIds = Arc::new(move || {
+            containers
+                .list()
+                .into_iter()
+                .filter(|container| container.state() == ContainerState::Running)
+                .map(|container| container.id)
+                .collect()
+        });
+
+        self.usage.watch(&self.engine, running, self.cancel.clone())
     }
 
     pub fn containers(&self) -> Vec<Container> {

@@ -12,7 +12,8 @@ use contr_sdk::api::containers::v1::{
 };
 use contr_sdk::api::daemon::v1::{BackendKind, Capability};
 use contr_sdk::api::engine::v1::{
-    EngineState, ResetRequest, ResetScope, StartRequest, StopRequest, reset_response, start_response, stop_response,
+    EngineState, ResetRequest, ResetScope, StartRequest, StopRequest, StreamUsageRequest, reset_response,
+    start_response, stop_response,
 };
 use contr_sdk::{Client, ClientIdentity, Endpoint, Error};
 use tokio::sync::oneshot;
@@ -344,6 +345,37 @@ async fn factory_reset_empties_the_engine() {
         client.list_containers().await,
         Err(Error::EngineNotRunning(_))
     ));
+
+    daemon.stop().await;
+}
+
+#[tokio::test]
+async fn usage_reports_capacity_and_ends_when_the_engine_stops() {
+    let daemon = Daemon::start();
+    let client = daemon.client().await;
+    start_engine(&client).await;
+
+    let mut usage = client
+        .engine()
+        .stream_usage(StreamUsageRequest {})
+        .await
+        .unwrap()
+        .into_inner();
+    let first = usage.message().await.unwrap().unwrap().usage.unwrap();
+    assert_eq!(first.cpus, 4);
+    assert_eq!(first.memory_total_bytes, 8_589_934_592);
+    assert_eq!(first.running_containers, 2);
+
+    let mut events = client.engine().stop(StopRequest {}).await.unwrap().into_inner();
+    while events.message().await.unwrap().is_some() {}
+    let ended = loop {
+        match usage.message().await {
+            Ok(Some(_)) => {}
+            Ok(None) => panic!("the stream ended without a status"),
+            Err(status) => break status,
+        }
+    };
+    assert!(matches!(Error::from(ended), Error::EngineNotRunning(_)));
 
     daemon.stop().await;
 }

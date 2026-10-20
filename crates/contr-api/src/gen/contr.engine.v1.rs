@@ -84,6 +84,35 @@ pub mod reset_response {
         State(i32),
     }
 }
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct StreamUsageRequest {}
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct StreamUsageResponse {
+    #[prost(message, optional, tag = "1")]
+    pub usage: ::core::option::Option<EngineUsage>,
+}
+/// Resources the engine uses: the CPU and memory of its running containers, and the disk its data takes. The first
+/// sample of a stream can report zero CPU and memory while container stats start.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct EngineUsage {
+    /// 100.0 per fully used CPU, summed over running containers.
+    #[prost(double, tag = "1")]
+    pub cpu_percent: f64,
+    /// CPUs of the machine the engine runs on; on Windows, the WSL virtual machine.
+    #[prost(uint32, tag = "2")]
+    pub cpus: u32,
+    /// Summed over running containers and counted as `docker stats` counts it.
+    #[prost(uint64, tag = "3")]
+    pub memory_used_bytes: u64,
+    /// Memory of the machine the engine runs on; on Windows, the WSL virtual machine.
+    #[prost(uint64, tag = "4")]
+    pub memory_total_bytes: u64,
+    /// Images, containers, volumes and build cache; refreshed about once a minute, zero until first measured.
+    #[prost(uint64, tag = "5")]
+    pub disk_used_bytes: u64,
+    #[prost(uint32, tag = "6")]
+    pub running_containers: u32,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum EngineState {
@@ -373,6 +402,31 @@ pub mod engine_service_client {
                 .insert(GrpcMethod::new("contr.engine.v1.EngineService", "Reset"));
             self.inner.server_streaming(req, path, codec).await
         }
+        /// Streams the engine's resource usage about every two seconds; ends with ENGINE_NOT_RUNNING when the engine stops.
+        pub async fn stream_usage(
+            &mut self,
+            request: impl tonic::IntoRequest<super::StreamUsageRequest>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::StreamUsageResponse>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.engine.v1.EngineService/StreamUsage",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("contr.engine.v1.EngineService", "StreamUsage"));
+            self.inner.server_streaming(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -445,6 +499,20 @@ pub mod engine_service_server {
             &self,
             request: tonic::Request<super::ResetRequest>,
         ) -> std::result::Result<tonic::Response<Self::ResetStream>, tonic::Status>;
+        /// Server streaming response type for the StreamUsage method.
+        type StreamUsageStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::StreamUsageResponse, tonic::Status>,
+            >
+            + std::marker::Send
+            + 'static;
+        /// Streams the engine's resource usage about every two seconds; ends with ENGINE_NOT_RUNNING when the engine stops.
+        async fn stream_usage(
+            &self,
+            request: tonic::Request<super::StreamUsageRequest>,
+        ) -> std::result::Result<
+            tonic::Response<Self::StreamUsageStream>,
+            tonic::Status,
+        >;
     }
     /// Lifecycle of the container engine the daemon manages.
     #[derive(Debug)]
@@ -738,6 +806,52 @@ pub mod engine_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = ResetSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.server_streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.engine.v1.EngineService/StreamUsage" => {
+                    #[allow(non_camel_case_types)]
+                    struct StreamUsageSvc<T: EngineService>(pub Arc<T>);
+                    impl<
+                        T: EngineService,
+                    > tonic::server::ServerStreamingService<super::StreamUsageRequest>
+                    for StreamUsageSvc<T> {
+                        type Response = super::StreamUsageResponse;
+                        type ResponseStream = T::StreamUsageStream;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::ResponseStream>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::StreamUsageRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as EngineService>::stream_usage(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = StreamUsageSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

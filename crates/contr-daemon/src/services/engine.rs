@@ -10,7 +10,7 @@ use futures_util::{Stream, StreamExt};
 use tokio_stream::wrappers::WatchStream;
 use tonic::{Request, Response, Status};
 
-use super::{ResponseStream, Shared};
+use super::{ResponseStream, Shared, watch};
 use crate::status;
 
 pub(crate) struct EngineApi(pub(crate) Arc<Shared>);
@@ -22,6 +22,7 @@ impl EngineService for EngineApi {
     type StopStream = ResponseStream<proto::StopResponse>;
     type RestartStream = ResponseStream<proto::RestartResponse>;
     type ResetStream = ResponseStream<proto::ResetResponse>;
+    type StreamUsageStream = ResponseStream<proto::StreamUsageResponse>;
 
     async fn watch_state(
         &self,
@@ -94,6 +95,16 @@ impl EngineService for EngineApi {
                 event: Some(reset_response::Event::State(state.into())),
             },
         )))
+    }
+
+    async fn stream_usage(
+        &self,
+        _: Request<proto::StreamUsageRequest>,
+    ) -> Result<Response<Self::StreamUsageStream>, Status> {
+        let usage = self.0.slot.get().await?.cache.watch_usage();
+        Ok(Response::new(watch(usage, |usage| proto::StreamUsageResponse {
+            usage: Some(usage),
+        })))
     }
 }
 

@@ -11,6 +11,7 @@ mod exec;
 mod images;
 mod networks;
 mod stats;
+mod usage;
 mod volumes;
 
 pub use cache::{Change, EngineCache};
