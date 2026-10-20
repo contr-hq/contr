@@ -61,6 +61,22 @@ jobs:
       - run: target/debug/contr-sdkgen verify --lang csharp --sdk target/sdk/csharp --daemon target/debug/contrd
       - run: dotnet build target/sdk/csharp/samples/ListContainers --configuration Release
 
+  guest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo xtask guest
+      - name: Images are importable by WSL
+        run: |
+          for image in target/guest/contr-runtime-amd64.tar target/guest/contr-data-amd64.tar; do
+            tar -tf "$image" | grep -qx 'etc/wsl.conf'
+            tar -tf "$image" | grep -qx 'usr/local/bin/contr-agent'
+            ! tar -tf "$image" | grep -qx 'etc/resolv.conf'
+          done
+          tar -tf target/guest/contr-runtime-amd64.tar | grep -qx 'usr/local/bin/dockerd'
+
   tools:
     runs-on: ubuntu-latest
     steps:

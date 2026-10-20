@@ -9,6 +9,9 @@
   Desktop, Podman Desktop, Lima, k3s).
 - Work against a Docker Engine context (`default` or `contr`), never `desktop-linux`. Run docker-dependent tests with a
   clean `DOCKER_CONFIG`.
+- Where Docker Desktop for Linux is installed, its `/usr/lib/docker/cli-plugins` shadows the engine's own
+  `docker-buildx` and `docker-compose`. Point `DOCKER_CONFIG` at a directory whose `cli-plugins` links the engine's
+  plugins (`/usr/libexec/docker/cli-plugins`); `cargo xtask guest` refuses a Desktop buildx.
 
 ## Code
 
