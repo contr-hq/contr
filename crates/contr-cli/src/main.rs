@@ -3,6 +3,7 @@
 mod cli_tools;
 mod exec;
 mod format;
+mod wsl;
 
 use std::process::ExitCode;
 
@@ -40,6 +41,9 @@ enum Command {
     /// Show or install the Docker CLI tools the daemon bundles.
     #[command(subcommand)]
     Cli(cli_tools::CliCommand),
+    /// Show or change which of your WSL distributions reach the engine.
+    #[command(subcommand)]
+    Wsl(wsl::WslCommand),
 }
 
 fn main() -> ExitCode {
@@ -69,6 +73,7 @@ async fn run(command: Command) -> anyhow::Result<i32> {
         Command::Ps { all } => ps(&Client::connect_default(&identity).await?, all).await,
         Command::Exec(args) => exec::run(&Client::connect_default(&identity).await?, args).await,
         Command::Cli(command) => cli_tools::run(&Client::connect_or_start(&identity).await?, command).await,
+        Command::Wsl(command) => wsl::run(&Client::connect_or_start(&identity).await?, command).await,
     }
 }
 
