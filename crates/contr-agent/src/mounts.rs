@@ -1,12 +1,22 @@
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Whether `path` is the mount point of a filesystem in this mount namespace.
 pub(crate) fn is_mount_point(path: &Path) -> io::Result<bool> {
     let mount_info = fs::read_to_string("/proc/self/mountinfo")?;
 
     Ok(mount_points(&mount_info).any(|point| Path::new(&point) == path))
+}
+
+/// Mount points strictly inside `dir` in this mount namespace.
+pub(crate) fn mount_points_under(dir: &Path) -> io::Result<Vec<PathBuf>> {
+    let mount_info = fs::read_to_string("/proc/self/mountinfo")?;
+
+    Ok(mount_points(&mount_info)
+        .map(PathBuf::from)
+        .filter(|point| point.starts_with(dir) && point != dir)
+        .collect())
 }
 
 /// Mount points listed in `/proc/self/mountinfo`, with octal escapes such as `\040` decoded.
