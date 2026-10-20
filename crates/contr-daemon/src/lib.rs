@@ -82,7 +82,12 @@ pub enum DaemonError {
 pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> Result<(), DaemonError> {
     let listener = bind(config.listen.as_ref())?;
     let backend = backend(&config)?;
-    let supervisor = EngineSupervisor::spawn(Arc::clone(&backend), Arc::new(Health), SupervisorConfig::default()).await;
+    // Only the WSL backend owns its engine; a host engine its administrator stopped must stay stopped.
+    let supervision = SupervisorConfig {
+        recover: backend.kind() == BackendKind::Wsl,
+        ..SupervisorConfig::default()
+    };
+    let supervisor = EngineSupervisor::spawn(Arc::clone(&backend), Arc::new(Health), supervision).await;
     let slot = EngineSlot::spawn(&supervisor, docker_context(&config, backend.kind()));
     let shared = Arc::new(Shared {
         supervisor,
