@@ -6,9 +6,9 @@ mod data;
 #[cfg(target_os = "linux")]
 mod engine;
 #[cfg(target_os = "linux")]
-mod mounts;
+mod host;
 #[cfg(target_os = "linux")]
-mod network;
+mod mounts;
 
 use std::path::PathBuf;
 

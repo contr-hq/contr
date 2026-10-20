@@ -5,15 +5,15 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
 use contr_core::guest;
-use contr_mux::{Channel, MuxStream};
+use contr_mux::{Channel, MuxStream, Role};
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 use tokio::net::UnixStream;
 use tokio::process::{Child, Command};
 use tokio::signal::unix::{SignalKind, signal};
 
+use crate::host;
 use crate::mounts::is_mount_point;
-use crate::network;
 
 const DOCKERD: &str = "/usr/local/bin/dockerd";
 const LOG_DIR: &str = "/var/log/contr";
@@ -30,10 +30,17 @@ pub(crate) async fn serve(data_root: Option<PathBuf>) -> anyhow::Result<()> {
         None => default_data_root()?,
     };
     let mut engine = Engine::start(data_root)?;
-    let mut session = tokio::spawn(contr_mux::serve(
+    let (opener, driver) = contr_mux::session(
         tokio::io::join(tokio::io::stdin(), tokio::io::stdout()),
+        Role::Guest,
         relay,
-    ));
+    );
+    let mut session = tokio::spawn(driver);
+    tokio::spawn(async move {
+        if let Err(error) = host::forward(opener).await {
+            tracing::warn!(error = format!("{error:#}"), "host.docker.internal is unavailable");
+        }
+    });
     let mut terminate = signal(SignalKind::terminate())?;
 
     loop {
@@ -154,9 +161,7 @@ fn spawn_dockerd(data_root: &Path) -> anyhow::Result<Child> {
         .arg(data_root)
         .arg("--host")
         .arg(format!("unix://{}", guest::ENGINE_SOCKET));
-    if let Some(gateway) = network::default_gateway() {
-        command.arg("--host-gateway-ip").arg(gateway.to_string());
-    }
+    command.arg("--host-gateway-ip").arg(guest::HOST_ADDRESS.to_string());
     let child = command
         .env("PATH", SEARCH_PATH)
         .stdin(Stdio::null())
