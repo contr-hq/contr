@@ -15,6 +15,9 @@ const COMMAND_QUEUE: usize = 16;
 const EVENT_QUEUE: usize = 64;
 const READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const MISSED_PINGS_BEFORE_FAILURE: u32 = 2;
+const MAX_RECOVERY_ATTEMPTS: u32 = 5;
+const FIRST_RECOVERY_DELAY: Duration = Duration::from_secs(5);
+const MAX_RECOVERY_DELAY: Duration = Duration::from_secs(120);
 
 /// Checks whether a Docker API answers; the daemon implements it with its engine client.
 #[async_trait]
@@ -30,6 +33,9 @@ pub struct SupervisorConfig {
     pub poll_interval: Duration,
     /// Time a started engine has to answer before the start fails.
     pub ready_timeout: Duration,
+    /// Restarts an engine that stops answering without a stop request, with growing delays, at most five times.
+    /// Only for backends whose engine nothing but the daemon starts and stops.
+    pub recover: bool,
 }
 
 impl Default for SupervisorConfig {
@@ -37,6 +43,7 @@ impl Default for SupervisorConfig {
         Self {
             poll_interval: Duration::from_secs(5),
             ready_timeout: Duration::from_secs(60),
+            recover: false,
         }
     }
 }
@@ -147,6 +154,7 @@ impl EngineSupervisor {
             config,
             status: status_sender,
             missed_pings: 0,
+            recovery: None,
         };
         let initial = actor.detect().await;
         actor.publish(initial);
@@ -207,12 +215,27 @@ impl ProgressSink for ChannelSink {
     }
 }
 
+struct LogSink;
+
+impl ProgressSink for LogSink {
+    fn report(&self, progress: Progress) {
+        tracing::debug!(message = progress.message, "recovery progress");
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Recovery {
+    attempts: u32,
+    next_attempt: Instant,
+}
+
 struct Actor {
     backend: Arc<dyn Backend>,
     health: Arc<dyn EngineHealth>,
     config: SupervisorConfig,
     status: watch::Sender<EngineStatus>,
     missed_pings: u32,
+    recovery: Option<Recovery>,
 }
 
 impl Actor {
@@ -232,6 +255,7 @@ impl Actor {
     }
 
     async fn execute(&mut self, Command { operation, events }: Command) {
+        self.recovery = None;
         let sink = ChannelSink(events.clone());
         let result = match operation {
             Operation::Start => self.start(&sink).await,
@@ -324,6 +348,12 @@ impl Actor {
     }
 
     async fn check_health(&mut self) {
+        if let Some(recovery) = self.recovery {
+            if Instant::now() >= recovery.next_attempt {
+                self.recover().await;
+            }
+            return;
+        }
         let connector = self.status.borrow().connector().cloned();
 
         let Some(connector) = connector else {
@@ -341,11 +371,42 @@ impl Actor {
         self.missed_pings += 1;
         if self.missed_pings >= MISSED_PINGS_BEFORE_FAILURE {
             self.missed_pings = 0;
-            let status = match self.detect_running().await {
-                Some(connector) => EngineStatus::running(connector),
-                None => EngineStatus::not_running(EngineState::Failed(ErrorReason::EngineNotRunning)),
-            };
-            self.publish(status);
+            if let Some(connector) = self.detect_running().await {
+                self.publish(EngineStatus::running(connector));
+                return;
+            }
+            self.publish(EngineStatus::not_running(EngineState::Failed(
+                ErrorReason::EngineNotRunning,
+            )));
+            if self.config.recover {
+                self.recovery = Some(Recovery {
+                    attempts: 0,
+                    next_attempt: Instant::now(),
+                });
+                self.recover().await;
+            }
+        }
+    }
+
+    async fn recover(&mut self) {
+        let Some(mut recovery) = self.recovery.take() else {
+            return;
+        };
+        recovery.attempts += 1;
+        tracing::warn!(
+            attempt = recovery.attempts,
+            "restarting the engine after it stopped answering"
+        );
+
+        match self.start(&LogSink).await {
+            Ok(_) => tracing::info!("engine recovered"),
+            Err(error) if recovery.attempts < MAX_RECOVERY_ATTEMPTS => {
+                let delay = recovery_delay(recovery.attempts);
+                tracing::warn!(%error, ?delay, "engine recovery failed; retrying");
+                recovery.next_attempt = Instant::now() + delay;
+                self.recovery = Some(recovery);
+            }
+            Err(error) => tracing::error!(%error, "engine recovery failed; giving up"),
         }
     }
 
@@ -391,10 +452,16 @@ impl Actor {
     }
 }
 
+fn recovery_delay(attempts: u32) -> Duration {
+    FIRST_RECOVERY_DELAY
+        .saturating_mul(2u32.saturating_pow(attempts.saturating_sub(1)))
+        .min(MAX_RECOVERY_DELAY)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
     use futures_util::StreamExt;
 
@@ -406,6 +473,7 @@ mod tests {
         engine_up: AtomicBool,
         start_brings_engine_up: AtomicBool,
         blocked: AtomicBool,
+        starts: AtomicU32,
     }
 
     fn connector() -> EngineConnector {
@@ -440,6 +508,7 @@ mod tests {
         }
 
         async fn start(&self, _: &dyn ProgressSink) -> Result<EngineConnector, BackendError> {
+            self.starts.fetch_add(1, Ordering::SeqCst);
             if self.start_brings_engine_up.load(Ordering::SeqCst) {
                 self.engine_up.store(true, Ordering::SeqCst);
             }
@@ -466,8 +535,32 @@ mod tests {
     }
 
     async fn supervisor(backend: &Arc<ScriptedBackend>) -> EngineSupervisor {
+        supervisor_with(backend, SupervisorConfig::default()).await
+    }
+
+    async fn supervisor_with(backend: &Arc<ScriptedBackend>, config: SupervisorConfig) -> EngineSupervisor {
         let health = Arc::new(BackendHealth(Arc::clone(backend)));
-        EngineSupervisor::spawn(backend.clone(), health, SupervisorConfig::default()).await
+        EngineSupervisor::spawn(backend.clone(), health, config).await
+    }
+
+    fn recovering() -> SupervisorConfig {
+        SupervisorConfig {
+            recover: true,
+            ..SupervisorConfig::default()
+        }
+    }
+
+    /// Waits until the backend has been started `starts` times and the supervisor reports `state`; a watch keeps
+    /// only the latest status, so states in between may never be observed.
+    async fn wait_for(
+        status: &mut watch::Receiver<EngineStatus>,
+        backend: &ScriptedBackend,
+        starts: u32,
+        state: EngineState,
+    ) {
+        while backend.starts.load(Ordering::SeqCst) < starts || status.borrow_and_update().state() != state {
+            status.changed().await.unwrap();
+        }
     }
 
     fn working_backend() -> Arc<ScriptedBackend> {
@@ -577,5 +670,64 @@ mod tests {
         status.changed().await.unwrap();
 
         assert_eq!(status.borrow().state(), EngineState::Running);
+    }
+    #[test]
+    fn recovery_delays_double_up_to_the_cap() {
+        let delays: Vec<_> = (1..=7).map(|attempt| recovery_delay(attempt).as_secs()).collect();
+
+        assert_eq!(delays, [5, 10, 20, 40, 80, 120, 120]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn lost_engine_is_restarted_when_recovering() {
+        let backend = working_backend();
+        let supervisor = supervisor_with(&backend, recovering()).await;
+        finished(supervisor.start().await).await.unwrap();
+        let mut status = supervisor.subscribe();
+
+        backend.engine_up.store(false, Ordering::SeqCst);
+        wait_for(&mut status, &backend, 2, EngineState::Running).await;
+
+        assert_eq!(backend.starts.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn recovery_gives_up_after_five_attempts() {
+        let backend = working_backend();
+        let supervisor = supervisor_with(&backend, recovering()).await;
+        finished(supervisor.start().await).await.unwrap();
+
+        backend.start_brings_engine_up.store(false, Ordering::SeqCst);
+        backend.engine_up.store(false, Ordering::SeqCst);
+        time::sleep(Duration::from_secs(3600)).await;
+
+        assert_eq!(backend.starts.load(Ordering::SeqCst), 1 + MAX_RECOVERY_ATTEMPTS);
+        assert_eq!(
+            supervisor.status().state(),
+            EngineState::Failed(ErrorReason::EngineNotRunning)
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stop_request_ends_recovery() {
+        let backend = working_backend();
+        let supervisor = supervisor_with(&backend, recovering()).await;
+        finished(supervisor.start().await).await.unwrap();
+        backend.start_brings_engine_up.store(false, Ordering::SeqCst);
+        backend.engine_up.store(false, Ordering::SeqCst);
+        let mut status = supervisor.subscribe();
+        wait_for(
+            &mut status,
+            &backend,
+            2,
+            EngineState::Failed(ErrorReason::EngineNotRunning),
+        )
+        .await;
+
+        finished(supervisor.stop().await).await.unwrap();
+        let starts = backend.starts.load(Ordering::SeqCst);
+        time::sleep(Duration::from_secs(3600)).await;
+
+        assert_eq!(backend.starts.load(Ordering::SeqCst), starts);
     }
 }
