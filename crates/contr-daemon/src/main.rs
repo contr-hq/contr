@@ -35,6 +35,9 @@ struct Args {
     /// Do not serve the engine on the Docker CLI's default pipe (Windows).
     #[arg(long)]
     no_default_pipe: bool,
+    /// Directory holding the Docker CLI tools to install for the user; defaults to `cli` next to this executable.
+    #[arg(long)]
+    cli_dir: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -79,6 +82,7 @@ fn main() -> anyhow::Result<()> {
         fixtures: args.fixtures,
         guest_dir: args.guest_dir,
         default_pipe: !args.no_default_pipe,
+        cli_dir: args.cli_dir,
         docker_context: !args.no_docker_context,
     };
 
