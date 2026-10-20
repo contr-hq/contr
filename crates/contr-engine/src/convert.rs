@@ -90,7 +90,58 @@ pub(crate) fn container_details(inspect: &docker::ContainerInspectResponse) -> c
         working_dir: config.and_then(|config| config.working_dir.clone()).unwrap_or_default(),
         env: config.and_then(|config| config.env.clone()).unwrap_or_default(),
         mounts: inspect.mounts.iter().flatten().map(mount).collect(),
+        restart_policy: inspect
+            .host_config
+            .as_ref()
+            .and_then(|host| host.restart_policy.as_ref())
+            .map(restart_policy),
+        command: config.and_then(|config| config.cmd.clone()).unwrap_or_default(),
+        entrypoint: config.and_then(|config| config.entrypoint.clone()).unwrap_or_default(),
+        user: config.and_then(|config| config.user.clone()).unwrap_or_default(),
+        hostname: config.and_then(|config| config.hostname.clone()).unwrap_or_default(),
+        networks: network_attachments(inspect),
     }
+}
+
+fn restart_policy(policy: &docker::RestartPolicy) -> containers::RestartPolicy {
+    use containers::RestartMode as Mode;
+    use docker::RestartPolicyNameEnum as Engine;
+
+    let mode = match policy.name {
+        Some(Engine::ALWAYS) => Mode::Always,
+        Some(Engine::UNLESS_STOPPED) => Mode::UnlessStopped,
+        Some(Engine::ON_FAILURE) => Mode::OnFailure,
+        Some(Engine::NO | Engine::EMPTY) | None => Mode::No,
+    };
+
+    containers::RestartPolicy {
+        mode: mode.into(),
+        max_retries: policy
+            .maximum_retry_count
+            .and_then(|count| u32::try_from(count).ok())
+            .unwrap_or_default(),
+    }
+}
+
+/// Attachments sorted by network name; the engine reports them as an unordered map.
+fn network_attachments(inspect: &docker::ContainerInspectResponse) -> Vec<containers::NetworkAttachment> {
+    let mut attachments: Vec<_> = inspect
+        .network_settings
+        .as_ref()
+        .and_then(|settings| settings.networks.as_ref())
+        .into_iter()
+        .flatten()
+        .map(|(network, endpoint)| containers::NetworkAttachment {
+            network: network.clone(),
+            ipv4_address: endpoint.ip_address.clone().unwrap_or_default(),
+            ipv6_address: endpoint.global_ipv6_address.clone().unwrap_or_default(),
+            mac_address: endpoint.mac_address.clone().unwrap_or_default(),
+            aliases: endpoint.aliases.clone().unwrap_or_default(),
+        })
+        .collect();
+    attachments.sort_by(|left, right| left.network.cmp(&right.network));
+
+    attachments
 }
 
 fn health_status(status: docker::HealthStatusEnum) -> containers::HealthStatus {
