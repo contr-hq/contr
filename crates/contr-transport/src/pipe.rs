@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use futures_util::Stream;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions};
+use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient, NamedPipeServer, PipeMode, ServerOptions};
 use tonic::transport::server::Connected;
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_PIPE_BUSY, HANDLE, LocalFree};
 use windows_sys::Win32::Security::Authorization::{
@@ -56,6 +56,7 @@ impl AsyncWrite for Connection {
 /// Named-pipe listener whose instances only the current user and SYSTEM may open, and only from this machine.
 pub struct Listener {
     name: String,
+    mode: PipeMode,
     security: SecurityDescriptor,
     next: NamedPipeServer,
 }
@@ -63,15 +64,26 @@ pub struct Listener {
 impl Listener {
     /// Creates the first instance of `endpoint`; fails when another process already owns the pipe name.
     pub fn bind(endpoint: &Endpoint) -> Result<Self, TransportError> {
+        Self::bind_mode(endpoint, PipeMode::Byte)
+    }
+
+    /// Like [`Listener::bind`] with message-mode instances, where an empty message ends one direction of a
+    /// connection; Docker Engine API clients on Windows signal and expect half-close that way.
+    pub fn bind_messages(endpoint: &Endpoint) -> Result<Self, TransportError> {
+        Self::bind_mode(endpoint, PipeMode::Message)
+    }
+
+    fn bind_mode(endpoint: &Endpoint, mode: PipeMode) -> Result<Self, TransportError> {
         let Endpoint::NamedPipe(name) = endpoint else {
             return Err(TransportError::Unsupported("Unix socket"));
         };
         let sddl = format!("D:P(A;;GA;;;{})(A;;GA;;;SY)", current_user_sid()?);
         let security = SecurityDescriptor::from_sddl(&sddl)?;
-        let next = security.create_instance(name, true)?;
+        let next = security.create_instance(name, true, mode)?;
 
         Ok(Self {
             name: name.clone(),
+            mode,
             security,
             next,
         })
@@ -92,7 +104,7 @@ impl Listener {
 
     async fn accept(&mut self) -> io::Result<Connection> {
         self.next.connect().await?;
-        let next = self.security.create_instance(&self.name, false)?;
+        let next = self.security.create_instance(&self.name, false, self.mode)?;
         Ok(Connection(std::mem::replace(&mut self.next, next)))
     }
 }
@@ -185,14 +197,17 @@ impl SecurityDescriptor {
         Ok(Self(descriptor))
     }
 
-    fn create_instance(&self, name: &str, first: bool) -> io::Result<NamedPipeServer> {
+    fn create_instance(&self, name: &str, first: bool, mode: PipeMode) -> io::Result<NamedPipeServer> {
         let mut attributes = SECURITY_ATTRIBUTES {
             nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>()).unwrap_or(u32::MAX),
             lpSecurityDescriptor: self.0,
             bInheritHandle: 0,
         };
         let mut options = ServerOptions::new();
-        options.first_pipe_instance(first).reject_remote_clients(true);
+        options
+            .first_pipe_instance(first)
+            .reject_remote_clients(true)
+            .pipe_mode(mode);
 
         // SAFETY: `attributes` and the descriptor it points to outlive the call, which copies both.
         unsafe { options.create_with_security_attributes_raw(name, (&raw mut attributes).cast::<c_void>()) }

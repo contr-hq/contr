@@ -33,6 +33,9 @@ impl DiscoveryFile {
     /// Replaces `path` atomically with a file only its owner can read.
     pub fn write(&self, path: &Path) -> Result<(), TransportError> {
         let json = serde_json::to_vec_pretty(self).map_err(io::Error::other)?;
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir)?;
+        }
         let staging = staging_path(path);
 
         let mut file = private_file(&staging)?;
@@ -96,5 +99,21 @@ mod tests {
         assert!(path.exists());
         DiscoveryFile::remove(&path, 42);
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn creates_a_missing_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Contr").join("run").join("daemon.json");
+        let file = DiscoveryFile {
+            pid: 1,
+            version: "0.1.0".to_owned(),
+            api_revision: 2,
+            endpoints: Vec::new(),
+        };
+
+        file.write(&path).unwrap();
+
+        assert_eq!(DiscoveryFile::read(&path).unwrap(), file);
     }
 }
