@@ -183,6 +183,97 @@ impl ContainersService for ContainersApi {
 
         Ok(Response::new(started.chain(relayed).chain(exited).boxed()))
     }
+
+    async fn create_container(
+        &self,
+        request: Request<proto::CreateContainerRequest>,
+    ) -> Result<Response<proto::CreateContainerResponse>, Status> {
+        let handle = self.0.slot.get().await?;
+        let created = handle
+            .engine
+            .create_container(&request.into_inner())
+            .await
+            .map_err(status::from_engine)?;
+        handle.cache.refresh_container(&created.id).await;
+
+        Ok(Response::new(created))
+    }
+
+    async fn prune_containers(
+        &self,
+        _: Request<proto::PruneContainersRequest>,
+    ) -> Result<Response<proto::PruneContainersResponse>, Status> {
+        let handle = self.0.slot.get().await?;
+        let pruned = handle.engine.prune_containers().await.map_err(status::from_engine)?;
+        for id in &pruned.deleted_ids {
+            handle.cache.refresh_container(id).await;
+        }
+
+        Ok(Response::new(pruned))
+    }
+
+    async fn pause_container(
+        &self,
+        request: Request<proto::PauseContainerRequest>,
+    ) -> Result<Response<proto::PauseContainerResponse>, Status> {
+        let id = request.into_inner().id;
+        let handle = self.0.slot.get().await?;
+        handle.engine.pause_container(&id).await.map_err(status::from_engine)?;
+        refresh(&handle.cache, &id).await;
+
+        Ok(Response::new(proto::PauseContainerResponse {}))
+    }
+
+    async fn unpause_container(
+        &self,
+        request: Request<proto::UnpauseContainerRequest>,
+    ) -> Result<Response<proto::UnpauseContainerResponse>, Status> {
+        let id = request.into_inner().id;
+        let handle = self.0.slot.get().await?;
+        handle
+            .engine
+            .unpause_container(&id)
+            .await
+            .map_err(status::from_engine)?;
+        refresh(&handle.cache, &id).await;
+
+        Ok(Response::new(proto::UnpauseContainerResponse {}))
+    }
+
+    async fn kill_container(
+        &self,
+        request: Request<proto::KillContainerRequest>,
+    ) -> Result<Response<proto::KillContainerResponse>, Status> {
+        let request = request.into_inner();
+        let handle = self.0.slot.get().await?;
+        handle
+            .engine
+            .kill_container(&request.id, &request.signal)
+            .await
+            .map_err(status::from_engine)?;
+        refresh(&handle.cache, &request.id).await;
+
+        Ok(Response::new(proto::KillContainerResponse {}))
+    }
+
+    async fn rename_container(
+        &self,
+        request: Request<proto::RenameContainerRequest>,
+    ) -> Result<Response<proto::RenameContainerResponse>, Status> {
+        let request = request.into_inner();
+        let handle = self.0.slot.get().await?;
+        let id = handle.cache.resolve_container(&request.id);
+        handle
+            .engine
+            .rename_container(&request.id, &request.name)
+            .await
+            .map_err(status::from_engine)?;
+        if let Some(id) = id {
+            handle.cache.refresh_container(&id).await;
+        }
+
+        Ok(Response::new(proto::RenameContainerResponse {}))
+    }
 }
 
 fn response(output: Output) -> proto::ExecResponse {
