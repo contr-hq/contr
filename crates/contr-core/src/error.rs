@@ -45,6 +45,19 @@ impl ErrorReason {
         }
     }
 
+    /// One-sentence explanation for users.
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::EngineNotRunning => "The engine is not running.",
+            Self::WslNotInstalled => "WSL 2 is not installed or is turned off.",
+            Self::VirtualizationDisabled => "Hardware virtualization is turned off in the firmware.",
+            Self::SocketPermissionDenied => "The engine's socket exists, but this user may not open it.",
+            Self::SettingLocked => "An administrator policy fixes this setting.",
+            Self::FeatureUnavailable => "This backend does not support the request.",
+            Self::EngineNotInstalled => "No container engine is installed.",
+        }
+    }
+
     /// Parses a name produced by [`Self::as_str`].
     pub fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|reason| reason.as_str() == name)

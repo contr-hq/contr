@@ -15,6 +15,11 @@ pub mod contr {
             include!("contr.daemon.v1.rs");
         }
     }
+    pub mod diagnostics {
+        pub mod v1 {
+            include!("contr.diagnostics.v1.rs");
+        }
+    }
     pub mod engine {
         pub mod v1 {
             include!("contr.engine.v1.rs");
