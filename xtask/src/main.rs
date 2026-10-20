@@ -1,5 +1,7 @@
 //! Repository automation, run as `cargo xtask <task>`.
 
+mod guest;
+
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
@@ -15,6 +17,12 @@ struct Cli {
 enum Task {
     /// Regenerate crates/contr-api/src/gen from proto/.
     Codegen,
+    /// Build the runtime and data guest root filesystems into target/guest with `docker buildx`.
+    Guest {
+        /// Docker platform architecture of the guests.
+        #[arg(long, default_value = "amd64", value_parser = ["amd64", "arm64"])]
+        arch: String,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -25,6 +33,7 @@ fn main() -> anyhow::Result<()> {
             let contract = Contract::load(&root.join("proto"))?;
             contr_sdkgen::rust::generate(&contract, &root.join("crates/contr-api/src/gen"))?;
         }
+        Task::Guest { arch } => guest::build(&root, &arch)?,
     }
 
     Ok(())
