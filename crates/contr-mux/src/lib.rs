@@ -1,5 +1,5 @@
 //! Stream multiplexing between `contrd` and the guest agent over one byte stream, such as the standard input and
-//! output of `wsl.exe`. The host opens streams with [`connect`]; the guest accepts them with [`serve`].
+//! output of `wsl.exe`. Either side opens streams to the other through a [`session`].
 
 #![warn(missing_docs)]
 
@@ -29,8 +29,10 @@ pub type MuxStream = Compat<yamux::Stream>;
 #[repr(u8)]
 #[non_exhaustive]
 pub enum Channel {
-    /// The engine's Docker API socket.
+    /// The engine's Docker API socket in the guest.
     Engine = 1,
+    /// A TCP connection to the host's loopback interface; its port follows as two big-endian bytes.
+    HostTcp = 2,
 }
 
 impl TryFrom<u8> for Channel {
@@ -39,9 +41,19 @@ impl TryFrom<u8> for Channel {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(Self::Engine),
+            2 => Ok(Self::HostTcp),
             other => Err(MuxError::UnknownChannel(other)),
         }
     }
+}
+
+/// Side of a session; only the host closes it once its last [`Opener`] is dropped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    /// `contrd`.
+    Host,
+    /// The guest agent.
+    Guest,
 }
 
 /// Failure of a multiplexed session or stream.
@@ -63,14 +75,14 @@ pub enum MuxError {
 
 type Reply = oneshot::Sender<Result<yamux::Stream, ConnectionError>>;
 
-/// Opens streams on the host side of a session; clones share the session.
+/// Opens streams to the peer of a session; clones share the session.
 #[derive(Clone, Debug)]
 pub struct Opener {
     requests: mpsc::Sender<Reply>,
 }
 
 impl Opener {
-    /// Opens a stream to `channel` in the guest.
+    /// Opens a stream to `channel` on the peer.
     pub async fn open(&self, channel: Channel) -> Result<MuxStream, MuxError> {
         let (reply, response) = oneshot::channel();
         self.requests.send(reply).await.map_err(|_| MuxError::Closed)?;
@@ -79,18 +91,43 @@ impl Opener {
 
         Ok(stream)
     }
+
+    /// Opens a [`Channel::HostTcp`] stream to `port` on the host's loopback interface.
+    pub async fn open_host_tcp(&self, port: u16) -> Result<MuxStream, MuxError> {
+        let mut stream = self.open(Channel::HostTcp).await?;
+        stream.write_all(&port.to_be_bytes()).await?;
+
+        Ok(stream)
+    }
 }
 
-/// Starts the host side of a session over `io`. The returned future drives every stream; it resolves when the guest
-/// closes the session, or after the last [`Opener`] is dropped and the session is closed.
-pub fn connect<T>(io: T) -> (Opener, impl Future<Output = Result<(), MuxError>> + Send)
+/// Port named by a [`Channel::HostTcp`] stream, read after its channel byte.
+pub async fn read_host_port(stream: &mut MuxStream) -> Result<u16, MuxError> {
+    let mut port = [0; 2];
+    stream.read_exact(&mut port).await?;
+
+    Ok(u16::from_be_bytes(port))
+}
+
+/// Starts a session over `io`. Each stream the peer opens goes to `handle` on its own task. The returned future
+/// drives every stream; it resolves when the peer closes the session or, on the host, after the last [`Opener`] is
+/// dropped and the session is closed.
+pub fn session<T, H, F>(io: T, role: Role, handle: H) -> (Opener, impl Future<Output = Result<(), MuxError>> + Send)
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    H: Fn(Channel, MuxStream) -> F + Send + Sync + 'static,
+    F: Future<Output = ()> + Send + 'static,
 {
-    let (requests, mut pending) = mpsc::channel::<Reply>(16);
-    let mut connection = Connection::new(buffered(io), config(), Mode::Client);
+    let handle = Arc::new(handle);
+    let (requests, receiver) = mpsc::channel::<Reply>(16);
+    let mode = match role {
+        Role::Host => Mode::Client,
+        Role::Guest => Mode::Server,
+    };
+    let mut connection = Connection::new(buffered(io), config(), mode);
 
     let driver = async move {
+        let mut pending = Some(receiver);
         let mut waiting: Option<Reply> = None;
         let mut closing = false;
         poll_fn(|cx| {
@@ -98,11 +135,14 @@ where
                 if closing {
                     return connection.poll_close(cx).map_err(MuxError::from);
                 }
-                if waiting.is_none() {
-                    match pending.poll_recv(cx) {
+                if waiting.is_none()
+                    && let Some(receiver) = pending.as_mut()
+                {
+                    match receiver.poll_recv(cx) {
                         Poll::Ready(Some(reply)) => waiting = Some(reply),
                         Poll::Ready(None) => {
-                            closing = true;
+                            pending = None;
+                            closing = role == Role::Host;
                             continue;
                         }
                         Poll::Pending => {}
@@ -118,7 +158,7 @@ where
                     }
                 }
                 match connection.poll_next_inbound(cx) {
-                    Poll::Ready(Some(Ok(_unsolicited))) => {}
+                    Poll::Ready(Some(Ok(stream))) => accept(stream, Arc::clone(&handle)),
                     Poll::Ready(Some(Err(error))) => return Poll::Ready(Err(error.into())),
                     Poll::Ready(None) => return Poll::Ready(Ok(())),
                     Poll::Pending => return Poll::Pending,
@@ -131,32 +171,18 @@ where
     (Opener { requests }, driver)
 }
 
-/// Runs the guest side of a session over `io`, handing each stream to `handle` on its own task. Resolves when the
-/// host closes the session.
-pub async fn serve<T, H, F>(io: T, handle: H) -> Result<(), MuxError>
+fn accept<H, F>(stream: yamux::Stream, handle: Arc<H>)
 where
-    T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     H: Fn(Channel, MuxStream) -> F + Send + Sync + 'static,
     F: Future<Output = ()> + Send + 'static,
 {
-    let handle = Arc::new(handle);
-    let mut connection = Connection::new(buffered(io), config(), Mode::Server);
-
-    loop {
-        let stream = match poll_fn(|cx| connection.poll_next_inbound(cx)).await {
-            Some(Ok(stream)) => stream,
-            Some(Err(error)) => return Err(error.into()),
-            None => return Ok(()),
-        };
-        let handle = Arc::clone(&handle);
-        tokio::spawn(async move {
-            let mut stream = stream.compat();
-            match read_channel(&mut stream).await {
-                Ok(channel) => handle(channel, stream).await,
-                Err(error) => tracing::warn!(%error, "rejected a multiplexed stream"),
-            }
-        });
-    }
+    tokio::spawn(async move {
+        let mut stream = stream.compat();
+        match read_channel(&mut stream).await {
+            Ok(channel) => handle(channel, stream).await,
+            Err(error) => tracing::warn!(%error, "rejected a multiplexed stream"),
+        }
+    });
 }
 
 fn config() -> Config {
@@ -186,6 +212,7 @@ mod tests {
     #[test]
     fn channel_values_round_trip() {
         assert_eq!(Channel::try_from(Channel::Engine as u8).ok(), Some(Channel::Engine));
+        assert_eq!(Channel::try_from(Channel::HostTcp as u8).ok(), Some(Channel::HostTcp));
         assert!(matches!(Channel::try_from(0), Err(MuxError::UnknownChannel(0))));
     }
 }
