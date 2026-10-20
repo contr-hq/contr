@@ -12,7 +12,9 @@ use clap::{Parser, Subcommand};
 use contr_core::product;
 use contr_sdk::api::containers::v1::ContainerState;
 use contr_sdk::api::daemon::v1::BackendKind;
-use contr_sdk::api::engine::v1::{EngineState, StartRequest, StopRequest, start_response, stop_response};
+use contr_sdk::api::engine::v1::{
+    EngineState, ResetRequest, ResetScope, StartRequest, StopRequest, reset_response, start_response, stop_response,
+};
 use contr_sdk::{Client, ClientIdentity, Error};
 
 #[derive(Parser)]
@@ -30,6 +32,12 @@ enum Command {
     Start,
     /// Stop the engine.
     Stop,
+    /// Stop the engine and replace its runtime, keeping images, containers and volumes.
+    Reset {
+        /// Delete every image, container, volume and the build cache instead.
+        #[arg(long)]
+        factory: bool,
+    },
     /// List containers.
     Ps {
         /// Show stopped containers too.
@@ -70,6 +78,7 @@ async fn run(command: Command) -> anyhow::Result<i32> {
         Command::Status => status(&identity).await,
         Command::Start => start(&Client::connect_or_start(&identity).await?).await,
         Command::Stop => stop(&Client::connect_default(&identity).await?).await,
+        Command::Reset { factory } => reset(&Client::connect_or_start(&identity).await?, factory).await,
         Command::Ps { all } => ps(&Client::connect_default(&identity).await?, all).await,
         Command::Exec(args) => exec::run(&Client::connect_default(&identity).await?, args).await,
         Command::Cli(command) => cli_tools::run(&Client::connect_or_start(&identity).await?, command).await,
@@ -163,6 +172,33 @@ async fn stop(client: &Client) -> anyhow::Result<i32> {
         match event.event {
             Some(stop_response::Event::Progress(progress)) => eprintln!("{}", progress.message),
             Some(stop_response::Event::State(state)) => {
+                println!(
+                    "Engine:    {}",
+                    state_name(EngineState::try_from(state).unwrap_or_default())
+                );
+            }
+            None => {}
+        }
+    }
+    Ok(0)
+}
+
+async fn reset(client: &Client, factory: bool) -> anyhow::Result<i32> {
+    let scope = if factory {
+        ResetScope::Factory
+    } else {
+        ResetScope::Runtime
+    };
+    let mut events = client
+        .engine()
+        .reset(ResetRequest { scope: scope.into() })
+        .await
+        .map_err(Error::from)?
+        .into_inner();
+    while let Some(event) = events.message().await.map_err(Error::from)? {
+        match event.event {
+            Some(reset_response::Event::Progress(progress)) => eprintln!("{}", progress.message),
+            Some(reset_response::Event::State(state)) => {
                 println!(
                     "Engine:    {}",
                     state_name(EngineState::try_from(state).unwrap_or_default())
