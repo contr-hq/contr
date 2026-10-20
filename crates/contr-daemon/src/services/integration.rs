@@ -4,7 +4,10 @@ use std::sync::Arc;
 
 use contr_api::integration::v1 as proto;
 use contr_api::integration::v1::integration_service_server::IntegrationService;
+use contr_backend::{IntegrationState, WslDistribution, WslIntegration};
 use contr_platform::cli_tools::{Bundle, Installation};
+use contr_settings::{SettingsError, SettingsFile};
+use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
 use super::Shared;
@@ -15,6 +18,12 @@ use crate::status;
 pub(crate) struct CliLocations {
     pub(crate) bundle: PathBuf,
     pub(crate) installation: Installation,
+}
+
+/// Engine access from the user's WSL distributions and the settings file that keeps it across restarts.
+pub(crate) struct WslAccess {
+    pub(crate) integration: Arc<dyn WslIntegration>,
+    pub(crate) settings: Mutex<SettingsFile>,
 }
 
 pub(crate) struct IntegrationApi(pub(crate) Arc<Shared>);
@@ -38,9 +47,51 @@ impl IntegrationService for IntegrationApi {
             cli_tools: Some(self.cli_tools(true).await?),
         }))
     }
+
+    async fn list_wsl_distributions(
+        &self,
+        _: Request<proto::ListWslDistributionsRequest>,
+    ) -> Result<Response<proto::ListWslDistributionsResponse>, Status> {
+        let distributions = distributions(self.wsl()?).await?;
+
+        Ok(Response::new(proto::ListWslDistributionsResponse {
+            distributions: distributions.into_iter().map(wsl_distribution).collect(),
+        }))
+    }
+
+    async fn set_wsl_integration(
+        &self,
+        request: Request<proto::SetWslIntegrationRequest>,
+    ) -> Result<Response<proto::SetWslIntegrationResponse>, Status> {
+        let wsl = self.wsl()?;
+        let request = request.into_inner();
+        let distribution = registered(wsl, &request.name).await?;
+        if distribution.version < 2 {
+            return Err(Status::failed_precondition(format!(
+                "{} runs on WSL 1; convert it with `wsl --set-version {} 2` first",
+                distribution.name, distribution.name
+            )));
+        }
+
+        remember(wsl, &distribution.name, request.enabled).await?;
+        wsl.integration
+            .set_integrated(&distribution.name, request.enabled)
+            .await;
+
+        Ok(Response::new(proto::SetWslIntegrationResponse {
+            distribution: Some(wsl_distribution(registered(wsl, &distribution.name).await?)),
+        }))
+    }
 }
 
 impl IntegrationApi {
+    fn wsl(&self) -> Result<&WslAccess, Status> {
+        self.0
+            .wsl
+            .as_ref()
+            .ok_or_else(|| status::feature_unavailable("the engine does not run in WSL"))
+    }
+
     async fn cli_tools(&self, install: bool) -> Result<proto::CliTools, Status> {
         let Some(locations) = self.0.cli.clone() else {
             if install {
@@ -52,6 +103,61 @@ impl IntegrationApi {
         tokio::task::spawn_blocking(move || cli_tools(&locations, install))
             .await
             .map_err(|error| Status::internal(error.to_string()))?
+    }
+}
+
+async fn distributions(wsl: &WslAccess) -> Result<Vec<WslDistribution>, Status> {
+    wsl.integration
+        .distributions()
+        .await
+        .map_err(|error| Status::internal(format!("cannot list the WSL distributions: {error}")))
+}
+
+/// The registered distribution `name`, which WSL compares without regard to case.
+async fn registered(wsl: &WslAccess, name: &str) -> Result<WslDistribution, Status> {
+    distributions(wsl)
+        .await?
+        .into_iter()
+        .find(|distribution| distribution.name.eq_ignore_ascii_case(name))
+        .ok_or_else(|| Status::not_found(format!("no WSL distribution named {name:?} is registered")))
+}
+
+async fn remember(wsl: &WslAccess, name: &str, integrated: bool) -> Result<(), Status> {
+    let file = wsl.settings.lock().await;
+    let mut settings = file.load().map_err(|error| settings_unusable(&error))?;
+    let changed = if integrated {
+        settings.wsl_integrations.insert(name.to_owned())
+    } else {
+        settings.wsl_integrations.remove(name)
+    };
+    if changed {
+        file.save(&settings).map_err(|error| settings_unusable(&error))?;
+    }
+
+    Ok(())
+}
+
+fn settings_unusable(error: &SettingsError) -> Status {
+    match std::error::Error::source(error) {
+        Some(cause) => Status::internal(format!("{error}: {cause}")),
+        None => Status::internal(error.to_string()),
+    }
+}
+
+fn wsl_distribution(distribution: WslDistribution) -> proto::WslDistribution {
+    let (state, failure) = match distribution.integration {
+        IntegrationState::Disabled => (proto::WslIntegrationState::Disabled, String::new()),
+        IntegrationState::Pending => (proto::WslIntegrationState::Pending, String::new()),
+        IntegrationState::Active => (proto::WslIntegrationState::Active, String::new()),
+        IntegrationState::Failed(reason) => (proto::WslIntegrationState::Failed, reason),
+    };
+
+    proto::WslDistribution {
+        name: distribution.name,
+        wsl_version: u32::from(distribution.version),
+        is_default: distribution.is_default,
+        integration_state: state.into(),
+        failure,
     }
 }
 

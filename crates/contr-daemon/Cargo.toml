@@ -30,6 +30,7 @@ contr-backend.workspace = true
 contr-core.workspace = true
 contr-engine.workspace = true
 contr-platform.workspace = true
+contr-settings.workspace = true
 contr-testkit = { workspace = true, optional = true }
 contr-transport.workspace = true
 futures-util.workspace = true

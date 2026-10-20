@@ -25,6 +25,7 @@ use tonic::transport::Server;
 
 use crate::services::{
     CliLocations, ContainersApi, DaemonApi, EngineApi, ImagesApi, IntegrationApi, NetworksApi, Shared, VolumesApi,
+    WslAccess,
 };
 use crate::slot::{DockerContext, EngineSlot};
 
@@ -86,7 +87,7 @@ pub enum DaemonError {
 /// Serves the API until `shutdown` completes.
 pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> Result<(), DaemonError> {
     let listener = bind(config.listen.as_ref())?;
-    let backend = backend(&config)?;
+    let (backend, wsl) = backend(&config)?;
     // Only the WSL backend owns its engine; a host engine its administrator stopped must stay stopped.
     let supervision = SupervisorConfig {
         recover: backend.kind() == BackendKind::Wsl,
@@ -101,6 +102,7 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
         capabilities: backend.capabilities(),
         started_at: SystemTime::now(),
         cli: cli_locations(config.cli_dir.clone()),
+        wsl,
     });
 
     let endpoint = listener.endpoint();
@@ -146,9 +148,10 @@ fn bind(listen: Option<&Endpoint>) -> Result<Listener, DaemonError> {
     Ok(Listener::bind(&Endpoint::default_for_user()?)?)
 }
 
-fn backend(config: &Config) -> Result<Arc<dyn Backend>, DaemonError> {
+/// The configured backend and, for WSL, access to the user's distributions.
+fn backend(config: &Config) -> Result<(Arc<dyn Backend>, Option<WslAccess>), DaemonError> {
     match config.backend {
-        BackendChoice::Host => host_backend(config.engine_socket.clone()),
+        BackendChoice::Host => Ok((host_backend(config.engine_socket.clone())?, None)),
         #[cfg(windows)]
         BackendChoice::Wsl => wsl_backend(config.guest_dir.clone(), config.default_pipe),
         #[cfg(feature = "fake")]
@@ -160,7 +163,7 @@ fn backend(config: &Config) -> Result<Arc<dyn Backend>, DaemonError> {
                 })?,
                 None => contr_testkit::Fixtures::basic(),
             };
-            Ok(Arc::new(contr_backend::FakeBackend::new(fixtures)))
+            Ok((Arc::new(contr_backend::FakeBackend::new(fixtures)), None))
         }
     }
 }
@@ -179,8 +182,12 @@ fn host_backend(_engine_socket: Option<PathBuf>) -> Result<Arc<dyn Backend>, Dae
     Err(DaemonError::UnsupportedBackend("host"))
 }
 
+/// The WSL backend, with the distributions the user's settings integrate; unreadable settings integrate none.
 #[cfg(windows)]
-fn wsl_backend(guest_dir: Option<PathBuf>, default_pipe: bool) -> Result<Arc<dyn Backend>, DaemonError> {
+fn wsl_backend(
+    guest_dir: Option<PathBuf>,
+    default_pipe: bool,
+) -> Result<(Arc<dyn Backend>, Option<WslAccess>), DaemonError> {
     let setup = |source| DaemonError::Backend { backend: "wsl", source };
     let guest_dir = match guest_dir {
         Some(dir) => dir,
@@ -191,9 +198,23 @@ fn wsl_backend(guest_dir: Option<PathBuf>, default_pipe: bool) -> Result<Arc<dyn
             .ok_or_else(|| setup(std::io::Error::other("contrd has no parent directory")))?,
     };
 
-    Ok(Arc::new(
-        contr_backend_wsl::WslBackend::new(guest_dir, default_pipe).map_err(setup)?,
-    ))
+    let settings = paths::settings_file()
+        .map(contr_settings::SettingsFile::new)
+        .ok_or_else(|| setup(std::io::Error::other("LOCALAPPDATA is not set")))?;
+    let integrated = match settings.load() {
+        Ok(settings) => settings.wsl_integrations,
+        Err(error) => {
+            tracing::warn!(?error, "cannot read the settings; no WSL distribution is integrated");
+            std::collections::BTreeSet::new()
+        }
+    };
+
+    let backend = Arc::new(contr_backend_wsl::WslBackend::new(guest_dir, default_pipe, integrated).map_err(setup)?);
+    let wsl = WslAccess {
+        integration: Arc::clone(&backend) as Arc<dyn contr_backend::WslIntegration>,
+        settings: tokio::sync::Mutex::new(settings),
+    };
+    Ok((backend, Some(wsl)))
 }
 
 /// Bundled tools default to `cli` next to the executable; only Windows bundles them.
