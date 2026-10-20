@@ -4,7 +4,7 @@ use std::ffi::c_void;
 use std::io;
 use std::pin::Pin;
 use std::ptr;
-use std::task::{Context, Poll};
+use std::task::{Context, Poll, ready};
 use std::time::Duration;
 
 use futures_util::Stream;
@@ -24,8 +24,13 @@ use crate::{Endpoint, TransportError};
 
 const BUSY_RETRY_DELAY: Duration = Duration::from_millis(50);
 
-/// Accepted pipe connection, ready for `tonic::transport::Server::serve_with_incoming`.
-pub struct Connection(NamedPipeServer);
+/// Accepted pipe connection, ready for `tonic::transport::Server::serve_with_incoming`. On a message-mode pipe,
+/// shutting down the write half sends the empty message that ends this direction.
+pub struct Connection {
+    pipe: NamedPipeServer,
+    message_mode: bool,
+    write_closed: bool,
+}
 
 impl Connected for Connection {
     type ConnectInfo = ();
@@ -35,21 +40,27 @@ impl Connected for Connection {
 
 impl AsyncRead for Connection {
     fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.0).poll_read(cx, buf)
+        Pin::new(&mut self.pipe).poll_read(cx, buf)
     }
 }
 
 impl AsyncWrite for Connection {
     fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.0).poll_write(cx, buf)
+        Pin::new(&mut self.pipe).poll_write(cx, buf)
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.0).poll_flush(cx)
+        Pin::new(&mut self.pipe).poll_flush(cx)
     }
 
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.0).poll_shutdown(cx)
+        let this = &mut *self;
+        if !this.message_mode || this.write_closed {
+            return Pin::new(&mut this.pipe).poll_shutdown(cx);
+        }
+        ready!(Pin::new(&mut this.pipe).poll_write(cx, &[]))?;
+        this.write_closed = true;
+        Poll::Ready(Ok(()))
     }
 }
 
@@ -105,7 +116,11 @@ impl Listener {
     async fn accept(&mut self) -> io::Result<Connection> {
         self.next.connect().await?;
         let next = self.security.create_instance(&self.name, false, self.mode)?;
-        Ok(Connection(std::mem::replace(&mut self.next, next)))
+        Ok(Connection {
+            pipe: std::mem::replace(&mut self.next, next),
+            message_mode: self.mode == PipeMode::Message,
+            write_closed: false,
+        })
     }
 }
 
