@@ -15,6 +15,7 @@ use contr_api::containers::v1::containers_service_server::ContainersServiceServe
 use contr_api::daemon::v1::daemon_service_server::DaemonServiceServer;
 use contr_api::engine::v1::engine_service_server::EngineServiceServer;
 use contr_api::images::v1::images_service_server::ImagesServiceServer;
+use contr_api::integration::v1::integration_service_server::IntegrationServiceServer;
 use contr_api::networks::v1::networks_service_server::NetworksServiceServer;
 use contr_api::volumes::v1::volumes_service_server::VolumesServiceServer;
 use contr_backend::{Backend, BackendKind, EngineConnector, EngineHealth, EngineSupervisor, SupervisorConfig};
@@ -22,7 +23,9 @@ use contr_core::{paths, product};
 use contr_transport::{DiscoveryFile, Endpoint, Listener, TransportError};
 use tonic::transport::Server;
 
-use crate::services::{ContainersApi, DaemonApi, EngineApi, ImagesApi, NetworksApi, Shared, VolumesApi};
+use crate::services::{
+    CliLocations, ContainersApi, DaemonApi, EngineApi, ImagesApi, IntegrationApi, NetworksApi, Shared, VolumesApi,
+};
 use crate::slot::{DockerContext, EngineSlot};
 
 /// Backend the daemon runs.
@@ -52,6 +55,8 @@ pub struct Config {
     pub guest_dir: Option<PathBuf>,
     /// Also serves the engine on the Docker CLI's default pipe when no other program owns it.
     pub default_pipe: bool,
+    /// Directory holding the Docker CLI tools the daemon installs for the user.
+    pub cli_dir: Option<PathBuf>,
     /// Keeps the Docker CLI context pointed at the running engine.
     pub docker_context: bool,
 }
@@ -95,6 +100,7 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
         backend_kind: backend.kind(),
         capabilities: backend.capabilities(),
         started_at: SystemTime::now(),
+        cli: cli_locations(config.cli_dir.clone()),
     });
 
     let endpoint = listener.endpoint();
@@ -117,6 +123,7 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
         .add_service(EngineServiceServer::new(EngineApi(Arc::clone(&shared))))
         .add_service(ContainersServiceServer::new(ContainersApi(Arc::clone(&shared))))
         .add_service(ImagesServiceServer::new(ImagesApi(Arc::clone(&shared))))
+        .add_service(IntegrationServiceServer::new(IntegrationApi(Arc::clone(&shared))))
         .add_service(VolumesServiceServer::new(VolumesApi(Arc::clone(&shared))))
         .add_service(NetworksServiceServer::new(NetworksApi(shared)))
         .serve_with_incoming_shutdown(listener.incoming(), shutdown)
@@ -187,6 +194,25 @@ fn wsl_backend(guest_dir: Option<PathBuf>, default_pipe: bool) -> Result<Arc<dyn
     Ok(Arc::new(
         contr_backend_wsl::WslBackend::new(guest_dir, default_pipe).map_err(setup)?,
     ))
+}
+
+/// Bundled tools default to `cli` next to the executable; only Windows bundles them.
+#[cfg(windows)]
+fn cli_locations(cli_dir: Option<PathBuf>) -> Option<CliLocations> {
+    let bundle = cli_dir.or_else(|| Some(std::env::current_exe().ok()?.parent()?.join("cli")))?;
+    let installation = contr_platform::cli_tools::Installation::new(paths::cli_dir()?);
+
+    Some(CliLocations { bundle, installation })
+}
+
+#[cfg(not(windows))]
+#[allow(
+    clippy::unnecessary_wraps,
+    clippy::needless_pass_by_value,
+    reason = "platforms that bundle CLI tools share the signature"
+)]
+fn cli_locations(_cli_dir: Option<PathBuf>) -> Option<CliLocations> {
+    None
 }
 
 fn docker_context(config: &Config, kind: BackendKind) -> Option<DockerContext> {

@@ -9,6 +9,7 @@ use contr_api::daemon::v1::{GetInfoRequest, GetInfoResponse, HandshakeRequest, H
 use contr_api::engine::v1::engine_service_client::EngineServiceClient;
 use contr_api::engine::v1::{WatchStateRequest, WatchStateResponse};
 use contr_api::images::v1::images_service_client::ImagesServiceClient;
+use contr_api::integration::v1::integration_service_client::IntegrationServiceClient;
 use contr_api::networks::v1::networks_service_client::NetworksServiceClient;
 use contr_api::volumes::v1::volumes_service_client::VolumesServiceClient;
 use contr_core::product;
@@ -108,6 +109,11 @@ impl Client {
     /// Images service.
     pub fn images(&self) -> ImagesServiceClient<Channel> {
         ImagesServiceClient::new(self.channel.clone())
+    }
+
+    /// Integration with the user's own tools.
+    pub fn integration(&self) -> IntegrationServiceClient<Channel> {
+        IntegrationServiceClient::new(self.channel.clone())
     }
 
     /// Volumes service.
