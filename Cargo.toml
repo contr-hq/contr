@@ -60,6 +60,7 @@ tower = { version = "0.5.3", default-features = false, features = ["util"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 windows-sys = "0.61.2"
+winreg = "0.56.0"
 yamux = "0.14.1"
 zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
 
