@@ -96,8 +96,21 @@ pub(crate) async fn route(engine: Arc<Engine>, request: Request<Incoming>) -> Re
         (&Method::GET, ["events"]) => events(&engine, query.get("since").and_then(|since| since.parse().ok())),
         (&Method::GET, ["containers", "json"]) => list_containers(&engine, &query),
         (&Method::GET, ["containers", id, "json"]) => inspect_container(&engine, id),
-        (&Method::POST, ["containers", id, action @ ("start" | "stop" | "restart")]) => {
-            change_container(&engine, id, action)
+        (&Method::POST, ["containers", "create"]) => match read_json(request).await {
+            Ok(body) => create_container(&engine, query.get("name").map(String::as_str), &body),
+            Err(message) => error(StatusCode::BAD_REQUEST, message),
+        },
+        (&Method::POST, ["containers", "prune"]) => prune_containers(&engine),
+        (
+            &Method::POST,
+            [
+                "containers",
+                id,
+                action @ ("start" | "stop" | "restart" | "pause" | "unpause" | "kill"),
+            ],
+        ) => change_container(&engine, id, action),
+        (&Method::POST, ["containers", id, "rename"]) => {
+            rename_container(&engine, id, query.get("name").map_or("", String::as_str))
         }
         (&Method::DELETE, ["containers", id]) => remove_container(&engine, id, flag(&query, "force")),
         (&Method::GET, ["images", "json"]) => ok_json(&Value::from(engine.store().images.clone())),
@@ -245,11 +258,21 @@ fn change_container(engine: &Engine, reference: &str, action: &str) -> Response<
         };
 
         let running = container["State"] == "running";
+        let paused = container["State"] == "paused";
         let (state, status, events): (&str, &str, &[&str]) = match action {
             "start" if running => return empty(StatusCode::NOT_MODIFIED),
             "stop" if !running => return empty(StatusCode::NOT_MODIFIED),
+            "pause" | "kill" if !running => {
+                return error(StatusCode::CONFLICT, &format!("container {reference} is not running"));
+            }
+            "unpause" if !paused => {
+                return error(StatusCode::CONFLICT, &format!("container {reference} is not paused"));
+            }
             "start" => ("running", "Up Less than a second", &["start"]),
+            "unpause" => ("running", "Up Less than a second", &["unpause"]),
             "stop" => ("exited", "Exited (0) Less than a second ago", &["die", "stop"]),
+            "pause" => ("paused", "Up Less than a second (Paused)", &["pause"]),
+            "kill" => ("exited", "Exited (137) Less than a second ago", &["kill", "die"]),
             _ => ("running", "Up Less than a second", &["die", "stop", "start", "restart"]),
         };
         container["State"] = state.into();
@@ -284,6 +307,100 @@ fn remove_container(engine: &Engine, reference: &str, force: bool) -> Response<B
 
     let id = removed["Id"].as_str().unwrap_or_default();
     engine.emit("container", "destroy", id, &json!({}));
+    empty(StatusCode::NO_CONTENT)
+}
+
+fn create_container(engine: &Engine, name: Option<&str>, body: &Value) -> Response<Body> {
+    let Some(image) = body["Image"].as_str().filter(|image| !image.is_empty()) else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "config cannot be empty in order to create a container",
+        );
+    };
+    let id = engine.new_id();
+    let name = name
+        .filter(|name| !name.is_empty())
+        .map_or_else(|| format!("fake_{}", &id[..12]), str::to_owned);
+
+    {
+        let mut store = engine.store();
+        let image_id = store.images.iter().find_map(|candidate| {
+            let tagged = candidate["RepoTags"]
+                .as_array()
+                .is_some_and(|tags| tags.iter().any(|tag| tag == image));
+            (tagged || candidate["Id"] == image).then(|| candidate["Id"].clone())
+        });
+        let Some(image_id) = image_id else {
+            return error(StatusCode::NOT_FOUND, &format!("No such image: {image}"));
+        };
+        if find_container(&store.containers, &name).is_some() {
+            let message = format!("Conflict. The container name \"/{name}\" is already in use");
+            return error(StatusCode::CONFLICT, &message);
+        }
+        store.containers.push(json!({
+            "Id": id,
+            "Names": [format!("/{name}")],
+            "Image": image,
+            "ImageID": image_id,
+            "Command": body["Cmd"].as_array().map(|cmd| {
+                cmd.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" ")
+            }).unwrap_or_default(),
+            "Created": unix_now(),
+            "Ports": [],
+            "Labels": body.get("Labels").cloned().filter(Value::is_object).unwrap_or_else(|| json!({})),
+            "State": "created",
+            "Status": "Created",
+        }));
+    }
+
+    engine.emit("container", "create", &id, &json!({ "name": name }));
+    json_response(StatusCode::CREATED, &json!({ "Id": id, "Warnings": [] }))
+}
+
+/// Removes every container that is neither running nor paused.
+fn prune_containers(engine: &Engine) -> Response<Body> {
+    let deleted: Vec<Value> = {
+        let mut store = engine.store();
+        let (kept, deleted) = std::mem::take(&mut store.containers)
+            .into_iter()
+            .partition(|container| container["State"] == "running" || container["State"] == "paused");
+        store.containers = kept;
+        deleted
+    };
+
+    let ids: Vec<&str> = deleted
+        .iter()
+        .filter_map(|container| container["Id"].as_str())
+        .collect();
+    for id in &ids {
+        engine.emit("container", "destroy", id, &json!({}));
+    }
+    ok_json(&json!({ "ContainersDeleted": ids, "SpaceReclaimed": 0 }))
+}
+
+fn rename_container(engine: &Engine, reference: &str, name: &str) -> Response<Body> {
+    if name.is_empty() {
+        return error(StatusCode::BAD_REQUEST, "Neither old nor new names may be empty");
+    }
+    let id = {
+        let mut store = engine.store();
+        if find_container(&store.containers, name).is_some() {
+            let message = format!("Conflict. The container name \"/{name}\" is already in use");
+            return error(StatusCode::CONFLICT, &message);
+        }
+        let Some(container) = find_container_mut(&mut store.containers, reference) else {
+            return no_such_container(reference);
+        };
+        container["Names"] = json!([format!("/{name}")]);
+        container["Id"].clone()
+    };
+
+    engine.emit(
+        "container",
+        "rename",
+        id.as_str().unwrap_or_default(),
+        &json!({ "name": name }),
+    );
     empty(StatusCode::NO_CONTENT)
 }
 

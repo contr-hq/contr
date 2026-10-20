@@ -6,7 +6,9 @@ use std::time::Duration;
 use contr_daemon::{BackendChoice, Config};
 use contr_sdk::api::containers::v1::watch_containers_response::Event;
 use contr_sdk::api::containers::v1::{
-    ContainerState, InspectContainerRequest, RemoveContainerRequest, StopContainerRequest, WatchContainersRequest,
+    ContainerState, CreateContainerRequest, InspectContainerRequest, KillContainerRequest, PauseContainerRequest,
+    PruneContainersRequest, RemoveContainerRequest, RenameContainerRequest, StopContainerRequest,
+    UnpauseContainerRequest, WatchContainersRequest,
 };
 use contr_sdk::api::daemon::v1::BackendKind;
 use contr_sdk::api::engine::v1::{EngineState, StartRequest, StopRequest, start_response, stop_response};
@@ -214,6 +216,95 @@ async fn inspect_returns_details_and_the_engine_document() {
     assert_eq!(inspected.container.unwrap().names, ["shop-db-1"]);
     assert_eq!(inspected.details.unwrap().mounts[0].name, "shop_pgdata");
     assert!(inspected.raw_json.contains("\"Name\":\"/shop-db-1\""));
+
+    daemon.stop().await;
+}
+
+async fn state_of(client: &Client, name: &str) -> Option<ContainerState> {
+    client
+        .list_containers()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|container| container.names.iter().any(|candidate| candidate == name))
+        .map(|container| container.state())
+}
+
+#[tokio::test]
+async fn creates_and_drives_a_container() {
+    let daemon = Daemon::start();
+    let client = daemon.client().await;
+    start_engine(&client).await;
+    let mut containers = client.containers();
+
+    let created = containers
+        .create_container(CreateContainerRequest {
+            image: "alpine:3.22".to_owned(),
+            name: "made".to_owned(),
+            start: true,
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(state_of(&client, "made").await, Some(ContainerState::Running));
+
+    let id = created.id.clone();
+    containers
+        .pause_container(PauseContainerRequest { id: id.clone() })
+        .await
+        .unwrap();
+    assert_eq!(state_of(&client, "made").await, Some(ContainerState::Paused));
+    containers
+        .unpause_container(UnpauseContainerRequest { id: id.clone() })
+        .await
+        .unwrap();
+    containers
+        .kill_container(KillContainerRequest {
+            id: id.clone(),
+            signal: String::new(),
+        })
+        .await
+        .unwrap();
+    containers
+        .rename_container(RenameContainerRequest {
+            id: id.clone(),
+            name: "renamed".to_owned(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(state_of(&client, "renamed").await, Some(ContainerState::Exited));
+
+    let pruned = containers
+        .prune_containers(PruneContainersRequest {})
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(pruned.deleted_ids.contains(&id));
+    assert_eq!(state_of(&client, "renamed").await, None);
+
+    daemon.stop().await;
+}
+
+#[tokio::test]
+async fn creating_needs_a_local_image_and_a_free_name() {
+    let daemon = Daemon::start();
+    let client = daemon.client().await;
+    start_engine(&client).await;
+    let mut containers = client.containers();
+    let request = |image: &str, name: &str| CreateContainerRequest {
+        image: image.to_owned(),
+        name: name.to_owned(),
+        ..Default::default()
+    };
+
+    let missing = containers.create_container(request("redis:8", "")).await.unwrap_err();
+    assert!(matches!(Error::from(missing), Error::NotFound(_)));
+    let taken = containers
+        .create_container(request("alpine:3.22", "shop-web-1"))
+        .await
+        .unwrap_err();
+    assert!(matches!(Error::from(taken), Error::Conflict(_)));
 
     daemon.stop().await;
 }
