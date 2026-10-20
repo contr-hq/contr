@@ -20,6 +20,7 @@ tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "s
 tracing.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+contr-engine-proxy.workspace = true
 contr-transport.workspace = true
 futures-util.workspace = true
 
