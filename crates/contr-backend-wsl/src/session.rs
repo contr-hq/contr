@@ -30,6 +30,7 @@ pub(crate) struct Session {
     agent: Child,
     opener: Opener,
     relays: Vec<JoinHandle<()>>,
+    shared_pipes: Vec<String>,
     integrations: Option<Running>,
     background: Vec<JoinHandle<()>>,
 }
@@ -66,11 +67,13 @@ impl Session {
         let listener = Listener::bind_messages(&Endpoint::NamedPipe(engine_pipe.to_owned()))
             .map_err(|error| io::Error::other(format!("cannot serve {engine_pipe}: {error}")))?;
         let mut relays = vec![relay(listener, opener.clone())];
+        let mut served = Vec::new();
         for pipe in shared_pipes {
             match Listener::bind_messages(&Endpoint::NamedPipe(pipe.clone())) {
                 Ok(listener) => {
                     tracing::info!(%pipe, "serving the engine");
                     relays.push(relay(listener, opener.clone()));
+                    served.push(pipe.clone());
                 }
                 Err(error) => tracing::info!(%error, %pipe, "another program serves this pipe"),
             }
@@ -81,6 +84,7 @@ impl Session {
             agent,
             opener,
             relays,
+            shared_pipes: served,
             integrations: None,
             background,
         };
@@ -91,6 +95,11 @@ impl Session {
         session.integrations = Some(integrations.run(runtime));
 
         Ok(session)
+    }
+
+    /// Whether this session serves `pipe`, one of the shared pipes it was asked to serve.
+    pub(crate) fn serves(&self, pipe: &str) -> bool {
+        self.shared_pipes.iter().any(|served| served == pipe)
     }
 
     /// Whether the agent and the data anchor are still running.

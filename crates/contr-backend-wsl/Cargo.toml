@@ -21,6 +21,7 @@ tracing.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 contr-engine-proxy.workspace = true
+contr-platform.workspace = true
 contr-transport.workspace = true
 futures-util.workspace = true
 
