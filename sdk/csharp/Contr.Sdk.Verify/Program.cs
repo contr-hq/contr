@@ -14,6 +14,18 @@ await Check("handshake reports the generated revision", () =>
     return Task.CompletedTask;
 });
 
+await Check("a missing pipe raises DaemonUnavailableException", async () =>
+{
+    var missing = ContrEndpoint.NamedPipe($"contr-sdk-verify-{Guid.NewGuid():N}");
+    await ExpectThrowsAsync<DaemonUnavailableException>(() => ConnectWithinAsync(missing));
+});
+
+await Check("a missing socket raises DaemonUnavailableException", async () =>
+{
+    var missing = ContrEndpoint.UnixSocket(Path.Combine(Path.GetTempPath(), $"contr-sdk-verify-{Guid.NewGuid():N}.sock"));
+    await ExpectThrowsAsync<DaemonUnavailableException>(() => ConnectWithinAsync(missing));
+});
+
 await Check("the engine starts stopped", async () =>
 {
     var state = await FirstAsync(ContrClient.ReadAllAsync(client.Engine.WatchState(new WatchStateRequest())));
@@ -125,6 +137,9 @@ async Task Check(string name, Func<Task> body)
         Console.WriteLine($"FAIL {name}: {exception.Message}");
     }
 }
+
+static Task<ContrClient> ConnectWithinAsync(ContrEndpoint endpoint, CancellationToken cancellationToken = default) =>
+    ContrClient.ConnectAsync(endpoint, "contr-sdk-verify", cancellationToken).WaitAsync(TimeSpan.FromSeconds(10));
 
 static void Expect(bool condition, string detail)
 {

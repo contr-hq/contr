@@ -12,6 +12,9 @@ namespace Contr.Sdk;
 /// </remarks>
 public static class ContrChannel
 {
+    /// <summary>Bound on a pipe connect; without one, <see cref="NamedPipeClientStream"/> retries forever while the pipe does not exist.</summary>
+    private static readonly TimeSpan PipeConnectTimeout = TimeSpan.FromSeconds(2);
+
     /// <summary>Channel whose connections all go to <paramref name="endpoint"/>.</summary>
     public static GrpcChannel Create(ContrEndpoint endpoint)
     {
@@ -56,8 +59,14 @@ public static class ContrChannel
         var pipe = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Anonymous);
         try
         {
-            await pipe.ConnectAsync(cancellationToken).ConfigureAwait(false);
+            await pipe.ConnectAsync(PipeConnectTimeout, cancellationToken).ConfigureAwait(false);
             return pipe;
+        }
+        catch (TimeoutException exception)
+        {
+            await pipe.DisposeAsync().ConfigureAwait(false);
+            // gRPC reports an IOException from the connect callback as status Unavailable.
+            throw new IOException($"No server answered on pipe {name} within {PipeConnectTimeout.TotalSeconds} s.", exception);
         }
         catch
         {
