@@ -169,6 +169,8 @@ fn info(engine: &Engine) -> Value {
         "ContainersRunning": running,
         "Images": store.images.len(),
         "OperatingSystem": "Contr fake engine",
+        "NCPU": 4,
+        "MemTotal": 8_589_934_592_u64,
         "SecurityOptions": ["name=seccomp,profile=builtin"],
     })
 }

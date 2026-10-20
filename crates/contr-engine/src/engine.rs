@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use bollard::query_parameters::DataUsageOptions;
 use bollard::{API_DEFAULT_VERSION, Docker};
 use contr_api::daemon::v1::EngineInfo;
 use contr_backend::EngineConnector;
@@ -57,6 +58,41 @@ impl Engine {
             kernel_version: version.kernel_version.unwrap_or_default(),
             rootless,
         })
+    }
+}
+
+impl Engine {
+    /// CPUs and memory bytes of the machine the engine runs on.
+    pub async fn capacity(&self) -> Result<(u32, u64), EngineError> {
+        let info = self.docker.info().await?;
+        let cpus = info.ncpu.and_then(|cpus| u32::try_from(cpus).ok()).unwrap_or_default();
+        let memory = info
+            .mem_total
+            .and_then(|bytes| u64::try_from(bytes).ok())
+            .unwrap_or_default();
+
+        Ok((cpus, memory))
+    }
+
+    /// Bytes that images, containers, volumes and the build cache take.
+    pub async fn disk_usage(&self) -> Result<u64, EngineError> {
+        let options = DataUsageOptions {
+            verbose: false,
+            ..Default::default()
+        };
+        let usage = self.docker.df(Some(options)).await?;
+        let sizes = [
+            usage.image_usage.and_then(|usage| usage.total_size),
+            usage.container_usage.and_then(|usage| usage.total_size),
+            usage.volume_usage.and_then(|usage| usage.total_size),
+            usage.build_cache_usage.and_then(|usage| usage.total_size),
+        ];
+
+        Ok(sizes
+            .into_iter()
+            .flatten()
+            .filter_map(|size| u64::try_from(size).ok())
+            .sum())
     }
 }
 

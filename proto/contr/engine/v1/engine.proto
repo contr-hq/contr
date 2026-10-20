@@ -20,6 +20,8 @@ service EngineService {
   // Stops the engine, then restores it to a clean state; fails with FEATURE_UNAVAILABLE, before stopping anything,
   // where the daemon does not own the engine. Cancelling the call does not cancel the operation.
   rpc Reset(ResetRequest) returns (stream ResetResponse);
+  // Streams the engine's resource usage about every two seconds; ends with ENGINE_NOT_RUNNING when the engine stops.
+  rpc StreamUsage(StreamUsageRequest) returns (stream StreamUsageResponse);
 }
 
 message WatchStateRequest {}
@@ -91,4 +93,26 @@ message ResetResponse {
     // Last message of the stream.
     EngineState state = 2;
   }
+}
+
+message StreamUsageRequest {}
+
+message StreamUsageResponse {
+  EngineUsage usage = 1;
+}
+
+// Resources the engine uses: the CPU and memory of its running containers, and the disk its data takes. The first
+// sample of a stream can report zero CPU and memory while container stats start.
+message EngineUsage {
+  // 100.0 per fully used CPU, summed over running containers.
+  double cpu_percent = 1;
+  // CPUs of the machine the engine runs on; on Windows, the WSL virtual machine.
+  uint32 cpus = 2;
+  // Summed over running containers and counted as `docker stats` counts it.
+  uint64 memory_used_bytes = 3;
+  // Memory of the machine the engine runs on; on Windows, the WSL virtual machine.
+  uint64 memory_total_bytes = 4;
+  // Images, containers, volumes and build cache; refreshed about once a minute, zero until first measured.
+  uint64 disk_used_bytes = 5;
+  uint32 running_containers = 6;
 }
