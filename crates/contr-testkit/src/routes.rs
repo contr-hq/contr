@@ -124,6 +124,7 @@ pub(crate) async fn route(engine: Arc<Engine>, request: Request<Incoming>) -> Re
         }
         (&Method::DELETE, ["containers", id]) => remove_container(&engine, id, flag(&query, "force")),
         (&Method::GET, ["images", "json"]) => ok_json(&Value::from(engine.store().images.clone())),
+        (&Method::GET, ["images", name @ .., "json"]) => inspect_image(&engine, &name.join("/")),
         (&Method::GET, ["volumes"]) => ok_json(&json!({ "Volumes": engine.store().volumes, "Warnings": [] })),
         (&Method::POST, ["volumes", "create"]) => match read_json(request).await {
             Ok(body) => create_volume(&engine, &body),
@@ -317,6 +318,47 @@ fn stats(engine: &Engine, reference: &str, stream: bool) -> Response<Body> {
         .header(header::CONTENT_TYPE, "application/json")
         .body(BodyExt::boxed_unsync(StreamBody::new(frames)))
         .unwrap_or_default()
+}
+
+/// The inspect document of a fixture image, with the configuration the fake gives its repository.
+fn inspect_image(engine: &Engine, reference: &str) -> Response<Body> {
+    let store = engine.store();
+    let found = store.images.iter().find(|image| {
+        let tagged = image["RepoTags"]
+            .as_array()
+            .is_some_and(|tags| tags.iter().any(|tag| tag == reference));
+        let id = image["Id"].as_str().unwrap_or_default();
+        tagged || id == reference || id.trim_start_matches("sha256:").starts_with(reference)
+    });
+    let Some(image) = found else {
+        return error(StatusCode::NOT_FOUND, &format!("No such image: {reference}"));
+    };
+    let repository = image["RepoTags"][0]
+        .as_str()
+        .and_then(|tag| tag.split(':').next())
+        .unwrap_or_default();
+    let (command, ports): (&[&str], Value) = match repository {
+        "nginx" => (&["nginx", "-g", "daemon off;"], json!({ "80/tcp": {} })),
+        "postgres" => (&["postgres"], json!({ "5432/tcp": {} })),
+        _ => (&["/bin/sh"], json!({})),
+    };
+
+    ok_json(&json!({
+        "Id": image["Id"],
+        "RepoTags": image["RepoTags"],
+        "RepoDigests": image["RepoDigests"],
+        "Created": rfc3339(image["Created"].as_i64().unwrap_or_default()),
+        "Size": image["Size"],
+        "Os": "linux",
+        "Architecture": "amd64",
+        "Config": {
+            "Env": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"],
+            "Cmd": command,
+            "ExposedPorts": ports,
+            "Labels": image["Labels"],
+        },
+        "RootFS": { "Type": "layers", "Layers": [image["Id"]] },
+    }))
 }
 
 fn change_container(engine: &Engine, reference: &str, action: &str) -> Response<Body> {
