@@ -380,6 +380,7 @@ dependencies = [
  "async-trait",
  "contr-backend",
  "contr-core",
+ "contr-engine-proxy",
  "contr-mux",
  "contr-transport",
  "futures-util",
@@ -468,6 +469,17 @@ dependencies = [
 [[package]]
 name = "contr-engine-proxy"
 version = "0.1.0"
+dependencies = [
+ "bytes",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "contr-helper"
