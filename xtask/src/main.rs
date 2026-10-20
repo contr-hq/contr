@@ -1,6 +1,8 @@
 //! Repository automation, run as `cargo xtask <task>`.
 
+mod docker;
 mod guest;
+mod windows_cli;
 
 use std::path::{Path, PathBuf};
 
@@ -23,6 +25,8 @@ enum Task {
         #[arg(long, default_value = "amd64", value_parser = ["amd64", "arm64"])]
         arch: String,
     },
+    /// Fetch the Docker CLI tools for Windows that contrd installs per user into target/windows-cli.
+    WindowsCli,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -34,6 +38,7 @@ fn main() -> anyhow::Result<()> {
             contr_sdkgen::rust::generate(&contract, &root.join("crates/contr-api/src/gen"))?;
         }
         Task::Guest { arch } => guest::build(&root, &arch)?,
+        Task::WindowsCli => windows_cli::build(&root)?,
     }
 
     Ok(())

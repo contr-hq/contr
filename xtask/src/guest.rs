@@ -6,9 +6,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, ensure};
 use contr_core::guest;
 
+use crate::docker;
+
 /// Exports the runtime and data guests as WSL-importable tarballs and writes their manifest.
 pub(crate) fn build(root: &Path, arch: &str) -> anyhow::Result<()> {
-    ensure_engine_buildx()?;
+    docker::ensure_engine_buildx()?;
     let out = root.join("target/guest");
     fs::create_dir_all(&out).with_context(|| format!("cannot create {}", out.display()))?;
     let release = release(root)?;
@@ -35,24 +37,6 @@ pub(crate) fn build(root: &Path, arch: &str) -> anyhow::Result<()> {
         serde_json::to_string_pretty(&manifest)? + "\n",
     )?;
     println!("{release}: {}", out.display());
-    Ok(())
-}
-
-/// Refuses Docker Desktop's buildx plugin, which shadows the engine's own plugin where both are installed;
-/// see CLAUDE.md.
-fn ensure_engine_buildx() -> anyhow::Result<()> {
-    let output = Command::new("docker")
-        .args(["buildx", "version"])
-        .output()
-        .context("cannot run docker buildx")?;
-    let version = String::from_utf8_lossy(&output.stdout);
-    ensure!(
-        output.status.success() && !version.contains("-desktop"),
-        "docker buildx resolves to a Docker Desktop plugin ({}); set DOCKER_CONFIG to a directory whose \
-         cli-plugins links the engine's docker-buildx",
-        version.trim()
-    );
-
     Ok(())
 }
 
