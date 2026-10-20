@@ -12,7 +12,7 @@ use tracing_subscriber::EnvFilter;
 #[command(name = product::DAEMON_BINARY, version, about)]
 struct Args {
     /// Engine backend.
-    #[arg(long, value_enum, default_value_t = Backend::Host)]
+    #[arg(long, value_enum, default_value_t = Backend::default())]
     backend: Backend,
     #[arg(
         long,
@@ -26,6 +26,9 @@ struct Args {
     /// Fixture file for the fake backend.
     #[arg(long)]
     fixtures: Option<PathBuf>,
+    /// Directory holding the WSL guest images; defaults to `guest` next to this executable.
+    #[arg(long)]
+    guest_dir: Option<PathBuf>,
     /// Leave the Docker CLI context alone.
     #[arg(long)]
     no_docker_context: bool,
@@ -34,8 +37,22 @@ struct Args {
 #[derive(Clone, Copy, ValueEnum)]
 enum Backend {
     Host,
+    #[cfg(windows)]
+    Wsl,
     #[cfg(feature = "fake")]
     Fake,
+}
+
+impl Default for Backend {
+    #[cfg(windows)]
+    fn default() -> Self {
+        Self::Wsl
+    }
+
+    #[cfg(not(windows))]
+    fn default() -> Self {
+        Self::Host
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -49,12 +66,15 @@ fn main() -> anyhow::Result<()> {
     let config = Config {
         backend: match args.backend {
             Backend::Host => BackendChoice::Host,
+            #[cfg(windows)]
+            Backend::Wsl => BackendChoice::Wsl,
             #[cfg(feature = "fake")]
             Backend::Fake => BackendChoice::Fake,
         },
         listen: args.listen.as_deref().map(str::parse).transpose()?,
         engine_socket: args.engine_socket,
         fixtures: args.fixtures,
+        guest_dir: args.guest_dir,
         docker_context: !args.no_docker_context,
     };
 

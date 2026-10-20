@@ -1,0 +1,165 @@
+use std::ffi::OsStr;
+use std::io;
+use std::path::Path;
+use std::process::{Output, Stdio};
+
+use contr_core::guest;
+use tokio::process::{Child, Command};
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// `wsl.exe` asked for UTF-8; without `WSL_UTF8` it writes UTF-16.
+fn wsl() -> Command {
+    let mut command = Command::new("wsl.exe");
+    command.env("WSL_UTF8", "1").stdin(Stdio::null());
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
+
+async fn run<I, S>(args: I) -> io::Result<Output>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    wsl().args(args).output().await
+}
+
+/// WSL version line, or `None` when no WSL answering `--version` is installed.
+pub(crate) async fn version() -> Option<String> {
+    let output = run(["--version"]).await.ok()?;
+
+    output.status.success().then(|| {
+        decode(&output.stdout)
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_owned()
+    })
+}
+
+/// Names of the registered distributions.
+pub(crate) async fn distributions() -> io::Result<Vec<String>> {
+    let output = run(["--list", "--quiet"]).await?;
+
+    // wsl.exe exits non-zero when no distribution is registered.
+    Ok(if output.status.success() {
+        names(&decode(&output.stdout))
+    } else {
+        Vec::new()
+    })
+}
+
+/// Registers `image` as WSL 2 distribution `name`, with its virtual disk in `install_dir`.
+pub(crate) async fn import(name: &str, install_dir: &Path, image: &Path) -> io::Result<()> {
+    std::fs::create_dir_all(install_dir)?;
+    let args = [
+        OsStr::new("--import"),
+        OsStr::new(name),
+        install_dir.as_os_str(),
+        image.as_os_str(),
+        OsStr::new("--version"),
+        OsStr::new("2"),
+    ];
+
+    check(&run(args).await?, &format!("import {name}"))
+}
+
+/// Unregisters distribution `name`, deleting its virtual disk.
+pub(crate) async fn unregister(name: &str) -> io::Result<()> {
+    check(&run(["--unregister", name]).await?, &format!("unregister {name}"))
+}
+
+/// Release recorded in distribution `name` when its image was built.
+pub(crate) async fn release(name: &str) -> io::Result<String> {
+    let output = run([
+        "--distribution",
+        name,
+        "--user",
+        "root",
+        "--exec",
+        "cat",
+        guest::RELEASE_FILE,
+    ])
+    .await?;
+    let release = decode(&output.stdout).trim().to_owned();
+    check(&output, &format!("read the release of {name}"))?;
+
+    Ok(release)
+}
+
+/// Starts `args` as root in distribution `name` with piped standard streams; the process ends when the child is
+/// dropped.
+pub(crate) fn spawn(name: &str, args: &[&str]) -> io::Result<Child> {
+    wsl()
+        .args(["--distribution", name, "--user", "root", "--exec"])
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+}
+
+fn check(output: &Output, action: &str) -> io::Result<()> {
+    if output.status.success() {
+        return Ok(());
+    }
+    let mut message = decode(&output.stdout);
+    message.push_str(&decode(&output.stderr));
+
+    Err(io::Error::other(format!(
+        "wsl.exe could not {action} ({}): {}",
+        output.status,
+        message.trim()
+    )))
+}
+
+/// Text written by `wsl.exe`, which ignores `WSL_UTF8` in some builds and writes UTF-16LE.
+fn decode(bytes: &[u8]) -> String {
+    let utf16 =
+        bytes.len() >= 2 && bytes.len().is_multiple_of(2) && bytes.iter().skip(1).step_by(2).all(|byte| *byte == 0);
+    if !utf16 {
+        return String::from_utf8_lossy(bytes).into_owned();
+    }
+    let units: Vec<u16> = bytes
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| u16::from_le_bytes(*pair))
+        .collect();
+
+    String::from_utf16_lossy(&units)
+}
+
+fn names(listing: &str) -> Vec<String> {
+    listing
+        .lines()
+        .map(|line| line.trim_matches(|c: char| c.is_whitespace() || c == '\0'))
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodes_utf8_and_utf16_output() {
+        let utf16: Vec<u8> = "contr\r\n".encode_utf16().flat_map(u16::to_le_bytes).collect();
+
+        assert_eq!(decode(b"contr\n"), "contr\n");
+        assert_eq!(decode(&utf16), "contr\r\n");
+    }
+
+    #[test]
+    fn lists_distribution_names() {
+        assert_eq!(
+            names("Ubuntu\r\ncontr\r\n\r\ncontr-data\r\n"),
+            ["Ubuntu", "contr", "contr-data"]
+        );
+    }
+}

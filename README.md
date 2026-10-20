@@ -16,8 +16,11 @@ generator. The desktop clients live in their own repositories and talk to the da
 
 ## Status
 
-Phase 1: on Linux, `contrd` manages a Docker Engine or Podman installed on the host and serves the gRPC API on a
-per-user socket. The `contr` CLI, the Rust SDK and the generated C# SDK talk to it. Windows backends come in Phase 2.
+- Linux: `contrd` manages a Docker Engine or Podman installed on the host and serves the gRPC API on a per-user
+  socket. The `contr` CLI, the Rust SDK and the generated C# SDK talk to it.
+- Windows (Phase 2, in progress): `contrd` runs Moby in two Contr-owned WSL 2 distributions and serves the engine on a
+  per-user named pipe with the `contr` docker context. Windows bind paths, `host.docker.internal`, CLI installation and
+  integration with the user's own distributions are not done yet.
 
 ## Layout
 
@@ -32,6 +35,7 @@ per-user socket. The `contr` CLI, the Rust SDK and the generated C# SDK talk to 
 | `crates/contr-sdkgen` | `contr-sdkgen`, the SDK generator |
 | `crates/*` | Remaining crates, one per responsibility; see each crate's description |
 | `sdk/csharp/` | Template of the generated C# SDK, its conformance program and samples |
+| `guest/` | Root filesystems of the WSL distributions, built by `cargo xtask guest` |
 | `packaging/linux/` | systemd user units for socket activation |
 | `specs/` | Clean-room specifications |
 | `docs/adr/` | Architecture decisions |
@@ -52,6 +56,15 @@ cargo build --package contr-daemon --package contr-cli
 target/debug/contr start
 target/debug/contr status
 docker --context contr ps
+```
+
+Build the WSL guest images (needs a Docker Engine with buildx) and try the Windows backend in the
+[Windows sandbox](tools/windows-sandbox/README.md):
+
+```sh
+cargo xtask guest
+tools/windows-sandbox/sandbox put target/guest/* C:/contr-guest
+tools/windows-sandbox/sandbox ssh 'cd C:/src/dockercraft; cargo build -p contr-daemon -p contr-cli'
 ```
 
 Generate the C# SDK and check it against the fake backend (needs the .NET 10 SDK):
