@@ -3,17 +3,19 @@ use std::str::FromStr;
 
 use bollard::container::LogOutput;
 use bollard::query_parameters::{
-    InspectContainerOptions, ListContainersOptions, LogsOptions, RemoveContainerOptions, RestartContainerOptions,
+    CreateContainerOptions, InspectContainerOptions, KillContainerOptions, ListContainersOptions, LogsOptions,
+    PruneContainersOptions, RemoveContainerOptions, RenameContainerOptions, RestartContainerOptions,
     StartContainerOptions, StatsOptions, StopContainerOptions,
 };
 use bytes::Bytes;
 use contr_api::containers::v1::{
-    Container, ContainerStats, InspectContainerResponse, LogStream, StreamLogsRequest, StreamLogsResponse,
+    Container, ContainerStats, CreateContainerRequest, CreateContainerResponse, InspectContainerResponse, LogStream,
+    PruneContainersResponse, StreamLogsRequest, StreamLogsResponse,
 };
 use futures_util::{Stream, StreamExt};
 use prost_types::Timestamp;
 
-use crate::{Engine, EngineError, convert, stats};
+use crate::{Engine, EngineError, convert, create, stats};
 
 impl Engine {
     /// Every container, stopped ones included.
@@ -77,6 +79,72 @@ impl Engine {
             signal: None,
         };
         Ok(self.docker().restart_container(reference, Some(options)).await?)
+    }
+
+    /// Creates the container `request` describes and starts it when asked; one that cannot start is removed with its
+    /// anonymous volumes.
+    pub async fn create_container(
+        &self,
+        request: &CreateContainerRequest,
+    ) -> Result<CreateContainerResponse, EngineError> {
+        let options = CreateContainerOptions {
+            name: Some(request.name.clone()).filter(|name| !name.is_empty()),
+            platform: request.platform.clone(),
+        };
+        let created = self
+            .docker()
+            .create_container(Some(options), create::definition(request)?)
+            .await?;
+
+        if request.start
+            && let Err(error) = self.start_container(&created.id).await
+        {
+            if let Err(cleanup) = self.remove_container(&created.id, true, true).await {
+                tracing::warn!(error = %cleanup, id = %created.id, "cannot remove a container that failed to start");
+            }
+            return Err(error);
+        }
+
+        Ok(CreateContainerResponse {
+            id: created.id,
+            warnings: created.warnings,
+        })
+    }
+
+    /// Deletes every stopped container.
+    pub async fn prune_containers(&self) -> Result<PruneContainersResponse, EngineError> {
+        let response = self.docker().prune_containers(None::<PruneContainersOptions>).await?;
+
+        Ok(PruneContainersResponse {
+            deleted_ids: response.containers_deleted.unwrap_or_default(),
+            reclaimed_bytes: response
+                .space_reclaimed
+                .and_then(|bytes| u64::try_from(bytes).ok())
+                .unwrap_or_default(),
+        })
+    }
+
+    pub async fn pause_container(&self, reference: &str) -> Result<(), EngineError> {
+        Ok(self.docker().pause_container(reference).await?)
+    }
+
+    pub async fn unpause_container(&self, reference: &str) -> Result<(), EngineError> {
+        Ok(self.docker().unpause_container(reference).await?)
+    }
+
+    /// Sends `signal`, or SIGKILL when it is empty.
+    pub async fn kill_container(&self, reference: &str, signal: &str) -> Result<(), EngineError> {
+        let options = Some(KillContainerOptions {
+            signal: signal.to_owned(),
+        })
+        .filter(|options| !options.signal.is_empty());
+
+        Ok(self.docker().kill_container(reference, options).await?)
+    }
+
+    pub async fn rename_container(&self, reference: &str, name: &str) -> Result<(), EngineError> {
+        let options = RenameContainerOptions { name: name.to_owned() };
+        Ok(self.docker().rename_container(reference, options).await?)
     }
 
     pub async fn remove_container(&self, reference: &str, force: bool, volumes: bool) -> Result<(), EngineError> {
