@@ -21,8 +21,9 @@ generator. The desktop clients live in their own repositories and talk to the da
 - Windows (Phase 2, in progress): `contrd` runs Moby in two Contr-owned WSL 2 distributions and serves the engine on a
   per-user named pipe with the `contr` docker context, and on `\\.\pipe\docker_engine` when no other program
   owns it, so `docker` works without a context. Windows bind paths such as `-v C:\src:/w` work, and
-  `host.docker.internal` reaches services on the Windows host, including those bound to `localhost`. CLI
-  installation and integration with the user's own distributions are not done yet.
+  `host.docker.internal` reaches services on the Windows host, including those bound to `localhost`.
+  `contr cli install` installs the bundled Docker CLI, Compose and Buildx for the user. Integration with the user's
+  own WSL distributions is not done yet.
 
 ## Layout
 
@@ -38,6 +39,7 @@ generator. The desktop clients live in their own repositories and talk to the da
 | `crates/*` | Remaining crates, one per responsibility; see each crate's description |
 | `sdk/csharp/` | Template of the generated C# SDK, its conformance program and samples |
 | `guest/` | Root filesystems of the WSL distributions, built by `cargo xtask guest` |
+| `packaging/windows/` | Docker CLI tools bundled for Windows, fetched by `cargo xtask windows-cli` |
 | `packaging/linux/` | systemd user units for socket activation |
 | `specs/` | Clean-room specifications |
 | `docs/adr/` | Architecture decisions |
@@ -65,6 +67,7 @@ Build the WSL guest images (needs a Docker Engine with buildx) and try the Windo
 
 ```sh
 cargo xtask guest
+cargo xtask windows-cli
 tools/windows-sandbox/sandbox put target/guest/* C:/contr-guest
 tools/windows-sandbox/sandbox ssh 'cd C:/src/dockercraft; cargo build -p contr-daemon -p contr-cli'
 ```
