@@ -1,14 +1,17 @@
+use std::collections::BTreeSet;
 use std::io;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
 use contr_backend::{
-    Backend, BackendError, BackendKind, Blocker, Capability, EngineConnector, Probe, Progress, ProgressSink, ResetScope,
+    Backend, BackendError, BackendKind, Blocker, Capability, EngineConnector, Probe, Progress, ProgressSink,
+    ResetScope, WslDistribution, WslIntegration,
 };
 use contr_core::{ErrorReason, Remediation, paths, product};
 use tokio::sync::Mutex;
 
 use crate::images::GuestImages;
+use crate::integration::Integrations;
 use crate::session::Session;
 use crate::wsl;
 
@@ -22,13 +25,15 @@ pub struct WslBackend {
     disks_dir: PathBuf,
     engine_pipe: String,
     shared_pipes: Vec<String>,
+    integrations: Integrations,
     session: Mutex<Option<Session>>,
 }
 
 impl WslBackend {
     /// Backend that installs the guest images described by the manifest in `images_dir`; with `default_pipe` it also
-    /// serves the Docker CLI's default pipe whenever no other program owns it.
-    pub fn new(images_dir: PathBuf, default_pipe: bool) -> io::Result<Self> {
+    /// serves the Docker CLI's default pipe whenever no other program owns it. The `integrated` distributions reach
+    /// the engine while it runs.
+    pub fn new(images_dir: PathBuf, default_pipe: bool, integrated: BTreeSet<String>) -> io::Result<Self> {
         let disks_dir = paths::wsl_dir().ok_or_else(|| io::Error::other("LOCALAPPDATA is not set"))?;
         let engine_pipe = product::engine_pipe_name(&contr_transport::current_user_sid()?);
         let shared_pipes = if default_pipe {
@@ -42,6 +47,7 @@ impl WslBackend {
             disks_dir,
             engine_pipe,
             shared_pipes,
+            integrations: Integrations::new(integrated),
             session: Mutex::new(None),
         })
     }
@@ -58,7 +64,7 @@ impl Backend for WslBackend {
     }
 
     fn capabilities(&self) -> &'static [Capability] {
-        &[]
+        &[Capability::WslIntegration]
     }
 
     async fn probe(&self) -> Result<Probe, BackendError> {
@@ -136,6 +142,7 @@ impl Backend for WslBackend {
             product::WSL_DATA_DISTRO,
             &self.engine_pipe,
             &self.shared_pipes,
+            &self.integrations,
         )
         .await?;
         *slot = Some(session);
@@ -167,6 +174,29 @@ impl Backend for WslBackend {
             }
         }
         Ok(())
+    }
+}
+
+#[async_trait]
+impl WslIntegration for WslBackend {
+    async fn distributions(&self) -> Result<Vec<WslDistribution>, BackendError> {
+        let own = [product::WSL_RUNTIME_DISTRO, product::WSL_DATA_DISTRO];
+
+        Ok(wsl::list()
+            .await?
+            .into_iter()
+            .filter(|listed| !own.contains(&listed.name.as_str()))
+            .map(|listed| WslDistribution {
+                integration: self.integrations.state(&listed.name),
+                name: listed.name,
+                version: listed.version,
+                is_default: listed.is_default,
+            })
+            .collect())
+    }
+
+    async fn set_integrated(&self, name: &str, integrated: bool) {
+        self.integrations.set(name, integrated);
     }
 }
 

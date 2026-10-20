@@ -172,3 +172,40 @@ pub trait Backend: Send + Sync + 'static {
     /// Restores the runtime to a clean state; the engine must be stopped first.
     async fn reset(&self, scope: ResetScope, progress: &dyn ProgressSink) -> Result<(), BackendError>;
 }
+
+/// One of the user's own WSL distributions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WslDistribution {
+    /// Name `wsl.exe` lists it under.
+    pub name: String,
+    /// WSL version that runs it; only version 2 distributions can reach the engine.
+    pub version: u8,
+    /// `wsl.exe` starts this distribution when none is named.
+    pub is_default: bool,
+    /// Its access to the engine.
+    pub integration: IntegrationState,
+}
+
+/// Engine access from one WSL distribution.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IntegrationState {
+    /// Not requested.
+    Disabled,
+    /// Requested; waits for the engine to run or for the distribution to start serving it.
+    Pending,
+    /// `docker` in the distribution reaches the engine.
+    Active,
+    /// Requested, but the last attempt failed for the given reason; it is retried.
+    Failed(String),
+}
+
+/// Engine access from the user's own WSL distributions, while the engine runs.
+#[async_trait]
+pub trait WslIntegration: Send + Sync + 'static {
+    /// The user's distributions, without the backend's own.
+    async fn distributions(&self) -> Result<Vec<WslDistribution>, BackendError>;
+
+    /// Requests or withdraws engine access from distribution `name`; withdrawing removes what the integration
+    /// added to the distribution.
+    async fn set_integrated(&self, name: &str, integrated: bool);
+}

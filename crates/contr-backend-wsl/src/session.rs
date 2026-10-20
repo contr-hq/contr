@@ -7,11 +7,13 @@ use contr_engine_proxy::Rewrites;
 use contr_mux::{Channel, Opener, Role};
 use contr_transport::{Endpoint, Listener};
 use futures_util::StreamExt;
-use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStdout};
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{Instant, sleep, timeout};
 
+use crate::integration::{Integrations, Running};
+use crate::output::{forward_log, wait_for_line};
 use crate::{host_tcp, ping, wsl};
 
 const ANCHOR_WAIT: Duration = Duration::from_secs(60);
@@ -21,33 +23,36 @@ const POLL_INTERVAL: Duration = Duration::from_millis(500);
 const AGENT_STOP: Duration = Duration::from_secs(60);
 const ANCHOR_STOP: Duration = Duration::from_secs(10);
 
-/// Running engine: the data anchor, the agent, the multiplexed session to the agent, and the per-user engine pipe
-/// that relays Docker API connections into that session.
+/// Running engine: the data anchor, the agent, the multiplexed session to the agent, the per-user engine pipe that
+/// relays Docker API connections into that session, and the integrations of the user's distributions.
 pub(crate) struct Session {
     anchor: Child,
     agent: Child,
     opener: Opener,
     relays: Vec<JoinHandle<()>>,
+    integrations: Option<Running>,
     background: Vec<JoinHandle<()>>,
 }
 
 impl Session {
     /// Anchors the data distribution, starts the agent in the runtime distribution, serves `engine_pipe` and each of
-    /// `shared_pipes` no other program owns, and returns once the engine answers a ping.
+    /// `shared_pipes` no other program owns, and returns once the engine answers a ping; the requested
+    /// `integrations` then run until the session stops.
     pub(crate) async fn start(
         runtime: &str,
         data: &str,
         engine_pipe: &str,
         shared_pipes: &[String],
+        integrations: &Integrations,
     ) -> io::Result<Self> {
         let mut background = Vec::new();
 
         let mut anchor = wsl::spawn(data, &[guest::AGENT_PATH, "data-anchor"])?;
-        background.push(forward_log(anchor.stderr.take(), data));
-        wait_for_line(anchor.stdout.take(), guest::DATA_READY).await?;
+        background.push(forward_log(anchor.stderr.take(), data, None));
+        wait_for_data(anchor.stdout.take()).await?;
 
-        let mut agent = wsl::spawn(runtime, &[guest::AGENT_PATH, "serve"])?;
-        background.push(forward_log(agent.stderr.take(), runtime));
+        let mut agent = wsl::spawn(runtime, &[guest::AGENT_PATH, "serve", "--share"])?;
+        background.push(forward_log(agent.stderr.take(), runtime, None));
         let (Some(stdout), Some(stdin)) = (agent.stdout.take(), agent.stdin.take()) else {
             return Err(io::Error::other("the agent has no standard streams"));
         };
@@ -76,12 +81,14 @@ impl Session {
             agent,
             opener,
             relays,
+            integrations: None,
             background,
         };
         if let Err(error) = session.wait_for_engine().await {
             session.stop().await;
             return Err(error);
         }
+        session.integrations = Some(integrations.run(runtime));
 
         Ok(session)
     }
@@ -91,8 +98,12 @@ impl Session {
         matches!(self.agent.try_wait(), Ok(None)) && matches!(self.anchor.try_wait(), Ok(None))
     }
 
-    /// Stops serving the pipes, closes the session so the agent stops the engine, then releases the data anchor.
+    /// Ends the integrations, stops serving the pipes, closes the session so the agent stops the engine, then
+    /// releases the data anchor.
     pub(crate) async fn stop(mut self) {
+        if let Some(integrations) = self.integrations.take() {
+            integrations.stop().await;
+        }
         for relay in &self.relays {
             relay.abort();
         }
@@ -173,38 +184,20 @@ fn relay(listener: Listener, opener: Opener) -> JoinHandle<()> {
     })
 }
 
-fn forward_log(stderr: Option<impl AsyncRead + Unpin + Send + 'static>, distribution: &str) -> JoinHandle<()> {
-    let distribution = distribution.to_owned();
-    tokio::spawn(async move {
-        let Some(stderr) = stderr else {
-            return;
-        };
-        let mut lines = BufReader::new(stderr).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            tracing::info!(target: "contr_agent", %distribution, "{line}");
-        }
-    })
-}
-
-async fn wait_for_line(stdout: Option<ChildStdout>, expected: &str) -> io::Result<()> {
+async fn wait_for_data(stdout: Option<ChildStdout>) -> io::Result<()> {
     let stdout = stdout.ok_or_else(|| io::Error::other("the data anchor has no standard output"))?;
     let mut lines = BufReader::new(stdout).lines();
-    let ready = async {
-        while let Some(line) = lines.next_line().await? {
-            if line.trim() == expected {
-                return Ok(());
-            }
-        }
-        Err(io::Error::new(
+
+    match timeout(ANCHOR_WAIT, wait_for_line(&mut lines, guest::DATA_READY)).await {
+        Ok(Ok(true)) => Ok(()),
+        Ok(Ok(false)) => Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
             "the data anchor exited before mounting engine data",
-        ))
-    };
-
-    timeout(ANCHOR_WAIT, ready).await.map_err(|_| {
-        io::Error::new(
+        )),
+        Ok(Err(error)) => Err(error),
+        Err(_) => Err(io::Error::new(
             io::ErrorKind::TimedOut,
             "the data anchor did not mount engine data in time",
-        )
-    })?
+        )),
+    }
 }
