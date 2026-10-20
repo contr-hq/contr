@@ -96,7 +96,7 @@ public sealed class ContrClient : IDisposable
             channel.Dispose();
             throw exception.StatusCode == StatusCode.Unimplemented
                 ? new VersionMismatchException($"The server at {endpoint} is not a {Product.DisplayName} daemon.", exception)
-                : ContrException.From(exception);
+                : Classify(exception, cancellationToken);
         }
     }
 
@@ -140,7 +140,7 @@ public sealed class ContrClient : IDisposable
         }
         catch (RpcException exception)
         {
-            throw ContrException.From(exception);
+            throw Classify(exception, cancellationToken);
         }
     }
 
@@ -165,7 +165,7 @@ public sealed class ContrClient : IDisposable
                 }
                 catch (RpcException exception)
                 {
-                    throw ContrException.From(exception);
+                    throw Classify(exception, cancellationToken);
                 }
 
                 yield return stream.Current;
@@ -175,6 +175,11 @@ public sealed class ContrClient : IDisposable
 
     /// <inheritdoc/>
     public void Dispose() => channel.Dispose();
+
+    private static Exception Classify(RpcException exception, CancellationToken cancellationToken) =>
+        exception.StatusCode == StatusCode.Cancelled && cancellationToken.IsCancellationRequested
+            ? new OperationCanceledException(exception.Status.Detail, exception, cancellationToken)
+            : ContrException.From(exception);
 
     private static void StartDaemon()
     {

@@ -26,6 +26,18 @@ await Check("a missing socket raises DaemonUnavailableException", async () =>
     await ExpectThrowsAsync<DaemonUnavailableException>(() => ConnectWithinAsync(missing));
 });
 
+await Check("a handshake with a cancelled token raises OperationCanceledException", async () =>
+{
+    await ExpectThrowsAsync<OperationCanceledException>(() => ConnectWithinAsync(client.Endpoint, new CancellationToken(canceled: true)));
+});
+
+await Check("cancelling a pending connect raises OperationCanceledException", async () =>
+{
+    using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+    var missing = ContrEndpoint.NamedPipe($"contr-sdk-verify-{Guid.NewGuid():N}");
+    await ExpectThrowsAsync<OperationCanceledException>(() => ConnectWithinAsync(missing, cancellation.Token));
+});
+
 await Check("the engine starts stopped", async () =>
 {
     var state = await FirstAsync(ContrClient.ReadAllAsync(client.Engine.WatchState(new WatchStateRequest())));
@@ -71,6 +83,17 @@ await Check("watch starts with a snapshot and reports a stop", async () =>
     await client.Containers.StopContainerAsync(new StopContainerRequest { Id = "shop-web-1", TimeoutSeconds = 0 });
     Expect(await events.MoveNextAsync(), "no upsert");
     Expect(events.Current.Upserted?.State == ContainerState.Exited, $"second event {events.Current}");
+});
+
+await Check("cancelling a stream read raises OperationCanceledException", async () =>
+{
+    using var cancellation = new CancellationTokenSource();
+    var watch = ContrClient.ReadAllAsync(client.Engine.WatchState(new WatchStateRequest()), cancellation.Token);
+    await using var states = watch.GetAsyncEnumerator();
+
+    Expect(await states.MoveNextAsync(), "no state");
+    cancellation.CancelAfter(TimeSpan.FromMilliseconds(100));
+    await ExpectThrowsAsync<OperationCanceledException>(async () => await states.MoveNextAsync());
 });
 
 await Check("inspect returns details and the engine document", async () =>
