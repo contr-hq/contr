@@ -11,6 +11,13 @@ service IntegrationService {
   // Installs the bundled Docker CLI tools for the calling user and adds them to the user's PATH; fails with
   // FEATURE_UNAVAILABLE where the daemon bundles none.
   rpc InstallCliTools(InstallCliToolsRequest) returns (InstallCliToolsResponse);
+  // Lists the calling user's WSL distributions, without Contr's own, and their access to the engine; fails with
+  // FEATURE_UNAVAILABLE where the engine does not run in WSL.
+  rpc ListWslDistributions(ListWslDistributionsRequest) returns (ListWslDistributionsResponse);
+  // Turns engine access from one WSL distribution on or off and keeps the choice across restarts; fails with
+  // FEATURE_UNAVAILABLE where the engine does not run in WSL, NOT_FOUND for a distribution that is not registered,
+  // and FAILED_PRECONDITION for a WSL 1 distribution.
+  rpc SetWslIntegration(SetWslIntegrationRequest) returns (SetWslIntegrationResponse);
 }
 
 message GetCliToolsRequest {}
@@ -43,4 +50,43 @@ message CliTool {
   string bundled_version = 2;
   // Version installed for the user; empty when not installed.
   string installed_version = 3;
+}
+
+message ListWslDistributionsRequest {}
+
+message ListWslDistributionsResponse {
+  repeated WslDistribution distributions = 1;
+}
+
+message SetWslIntegrationRequest {
+  string name = 1;
+  bool enabled = 2;
+}
+
+message SetWslIntegrationResponse {
+  WslDistribution distribution = 1;
+}
+
+// One of the user's WSL distributions.
+message WslDistribution {
+  string name = 1;
+  // 1 or 2; only version 2 distributions can reach the engine.
+  uint32 wsl_version = 2;
+  // `wsl.exe` starts this distribution when none is named.
+  bool is_default = 3;
+  WslIntegrationState integration_state = 4;
+  // Why the last attempt failed; empty unless the state is FAILED.
+  string failure = 5;
+}
+
+enum WslIntegrationState {
+  WSL_INTEGRATION_STATE_UNSPECIFIED = 0;
+  // Engine access is off.
+  WSL_INTEGRATION_STATE_DISABLED = 1;
+  // Engine access is on and waits for the engine to run or for the distribution to start serving it.
+  WSL_INTEGRATION_STATE_PENDING = 2;
+  // `docker` in the distribution reaches the engine.
+  WSL_INTEGRATION_STATE_ACTIVE = 3;
+  // Engine access is on, but the last attempt failed; Contr retries.
+  WSL_INTEGRATION_STATE_FAILED = 4;
 }
