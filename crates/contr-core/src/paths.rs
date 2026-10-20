@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 use crate::product;
 
+const SETTINGS_FILE: &str = "settings.json";
+
 /// Directory holding the daemon's socket and discovery file: `$XDG_RUNTIME_DIR/contr` on Unix and
 /// `%LOCALAPPDATA%\Contr\run` on Windows; `None` when that variable is unset.
 pub fn runtime_dir() -> Option<PathBuf> {
@@ -32,6 +34,21 @@ pub fn cli_dir() -> Option<PathBuf> {
     env::var_os("LOCALAPPDATA")
         .map(|dir| PathBuf::from(dir).join(product::DISPLAY_NAME).join("cli"))
         .filter(|dir| dir.is_absolute())
+}
+
+/// File holding the daemon's settings: `$XDG_CONFIG_HOME/contr/settings.json` (or under `~/.config`) on Unix and
+/// `%LOCALAPPDATA%\Contr\settings.json` on Windows; `None` when those variables are unset.
+pub fn settings_file() -> Option<PathBuf> {
+    #[cfg(unix)]
+    let dir = env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+        .map(|dir| dir.join(product::SLUG));
+    #[cfg(windows)]
+    let dir = env::var_os("LOCALAPPDATA").map(|dir| PathBuf::from(dir).join(product::DISPLAY_NAME));
+
+    dir.filter(|dir| dir.is_absolute()).map(|dir| dir.join(SETTINGS_FILE))
 }
 
 /// Default path of the daemon's gRPC socket.

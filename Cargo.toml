@@ -23,6 +23,7 @@ contr-mux = { path = "crates/contr-mux" }
 contr-platform = { path = "crates/contr-platform" }
 contr-sdk = { path = "crates/contr-sdk" }
 contr-sdkgen = { path = "crates/contr-sdkgen" }
+contr-settings = { path = "crates/contr-settings" }
 contr-testkit = { path = "crates/contr-testkit" }
 contr-transport = { path = "crates/contr-transport" }
 
