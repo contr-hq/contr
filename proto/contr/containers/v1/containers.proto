@@ -29,6 +29,19 @@ service ContainersService {
   rpc StreamStats(StreamStatsRequest) returns (stream StreamStatsResponse);
   // Runs a command in a running container and relays its input and output.
   rpc Exec(stream ExecRequest) returns (stream ExecResponse);
+  // Creates a container from a local image and, when asked, starts it; fails with NOT_FOUND when the image is not
+  // local. On Windows, bind sources are Windows paths. A container that cannot start is removed and the call fails.
+  rpc CreateContainer(CreateContainerRequest) returns (CreateContainerResponse);
+  // Deletes every stopped container.
+  rpc PruneContainers(PruneContainersRequest) returns (PruneContainersResponse);
+  // Freezes every process of a running container.
+  rpc PauseContainer(PauseContainerRequest) returns (PauseContainerResponse);
+  // Resumes a paused container.
+  rpc UnpauseContainer(UnpauseContainerRequest) returns (UnpauseContainerResponse);
+  // Sends a signal to the container's main process.
+  rpc KillContainer(KillContainerRequest) returns (KillContainerResponse);
+  // Gives a container a new name; fails with FAILED_PRECONDITION when another container has it.
+  rpc RenameContainer(RenameContainerRequest) returns (RenameContainerResponse);
 }
 
 // Container as the engine lists it.
@@ -123,6 +136,40 @@ message ContainerDetails {
   // VAR=value entries.
   repeated string env = 8;
   repeated Mount mounts = 9;
+  RestartPolicy restart_policy = 10;
+  // The command after the entrypoint.
+  repeated string command = 11;
+  repeated string entrypoint = 12;
+  // User the main process runs as; empty means the image's default.
+  string user = 13;
+  string hostname = 14;
+  repeated NetworkAttachment networks = 15;
+}
+
+// What the engine does when a container exits.
+message RestartPolicy {
+  RestartMode mode = 1;
+  // Restarts before giving up; only ON_FAILURE uses it, and zero means no limit.
+  uint32 max_retries = 2;
+}
+
+enum RestartMode {
+  RESTART_MODE_UNSPECIFIED = 0;
+  RESTART_MODE_NO = 1;
+  RESTART_MODE_ALWAYS = 2;
+  RESTART_MODE_UNLESS_STOPPED = 3;
+  RESTART_MODE_ON_FAILURE = 4;
+}
+
+// A network a container is attached to and its address there.
+message NetworkAttachment {
+  string network = 1;
+  // Empty when the container does not run.
+  string ipv4_address = 2;
+  // Empty when the container does not run or the network has no IPv6.
+  string ipv6_address = 3;
+  string mac_address = 4;
+  repeated string aliases = 5;
 }
 
 enum HealthStatus {
@@ -294,3 +341,95 @@ message ExecStarted {
 message ExecExited {
   int32 exit_code = 1;
 }
+
+message CreateContainerRequest {
+  // Reference of a local image.
+  string image = 1;
+  // Empty lets the engine choose a random name.
+  string name = 2;
+  // Replaces the image's command; empty keeps it.
+  repeated string command = 3;
+  // Replaces the image's entrypoint; empty keeps it.
+  repeated string entrypoint = 4;
+  // VAR=value entries added to the image's environment.
+  repeated string env = 5;
+  repeated PortPublication ports = 6;
+  repeated MountSpec mounts = 7;
+  // Network to attach to; empty means the engine's default bridge.
+  string network = 8;
+  RestartPolicy restart_policy = 9;
+  // Deletes the container when it exits.
+  bool auto_remove = 10;
+  map<string, string> labels = 11;
+  // Allocates a pseudo-terminal and keeps standard input open, as `docker run -it` does.
+  bool interactive = 12;
+  // Empty means the image's working directory.
+  string working_dir = 13;
+  // Empty means the image's user.
+  string user = 14;
+  // Platform such as "linux/arm64"; empty means the engine's own.
+  string platform = 15;
+  // Starts the container once created.
+  bool start = 16;
+}
+
+// A container port to publish on the host.
+message PortPublication {
+  uint32 container_port = 1;
+  Protocol protocol = 2;
+  // Zero lets the engine choose a free host port.
+  uint32 host_port = 3;
+  // Empty publishes on every host address.
+  string host_ip = 4;
+}
+
+// A filesystem to mount into a new container.
+message MountSpec {
+  // BIND, VOLUME or TMPFS.
+  MountKind kind = 1;
+  // Host path for BIND, as the client's operating system writes it; volume name for VOLUME, where empty creates an
+  // anonymous volume; empty for TMPFS.
+  string source = 2;
+  string destination = 3;
+  bool read_only = 4;
+}
+
+message CreateContainerResponse {
+  string id = 1;
+  // Warnings the engine returned, such as an ignored option.
+  repeated string warnings = 2;
+}
+
+message PruneContainersRequest {}
+
+message PruneContainersResponse {
+  repeated string deleted_ids = 1;
+  uint64 reclaimed_bytes = 2;
+}
+
+message PauseContainerRequest {
+  string id = 1;
+}
+
+message PauseContainerResponse {}
+
+message UnpauseContainerRequest {
+  string id = 1;
+}
+
+message UnpauseContainerResponse {}
+
+message KillContainerRequest {
+  string id = 1;
+  // Signal name such as "SIGTERM" or number such as "15"; empty sends SIGKILL.
+  string signal = 2;
+}
+
+message KillContainerResponse {}
+
+message RenameContainerRequest {
+  string id = 1;
+  string name = 2;
+}
+
+message RenameContainerResponse {}

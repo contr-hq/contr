@@ -114,6 +114,45 @@ pub struct ContainerDetails {
     pub env: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     #[prost(message, repeated, tag = "9")]
     pub mounts: ::prost::alloc::vec::Vec<Mount>,
+    #[prost(message, optional, tag = "10")]
+    pub restart_policy: ::core::option::Option<RestartPolicy>,
+    /// The command after the entrypoint.
+    #[prost(string, repeated, tag = "11")]
+    pub command: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag = "12")]
+    pub entrypoint: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// User the main process runs as; empty means the image's default.
+    #[prost(string, tag = "13")]
+    pub user: ::prost::alloc::string::String,
+    #[prost(string, tag = "14")]
+    pub hostname: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "15")]
+    pub networks: ::prost::alloc::vec::Vec<NetworkAttachment>,
+}
+/// What the engine does when a container exits.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RestartPolicy {
+    #[prost(enumeration = "RestartMode", tag = "1")]
+    pub mode: i32,
+    /// Restarts before giving up; only ON_FAILURE uses it, and zero means no limit.
+    #[prost(uint32, tag = "2")]
+    pub max_retries: u32,
+}
+/// A network a container is attached to and its address there.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NetworkAttachment {
+    #[prost(string, tag = "1")]
+    pub network: ::prost::alloc::string::String,
+    /// Empty when the container does not run.
+    #[prost(string, tag = "2")]
+    pub ipv4_address: ::prost::alloc::string::String,
+    /// Empty when the container does not run or the network has no IPv6.
+    #[prost(string, tag = "3")]
+    pub ipv6_address: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub mac_address: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag = "5")]
+    pub aliases: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// Filesystem mounted into a container.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -326,6 +365,135 @@ pub struct ExecExited {
     #[prost(int32, tag = "1")]
     pub exit_code: i32,
 }
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateContainerRequest {
+    /// Reference of a local image.
+    #[prost(string, tag = "1")]
+    pub image: ::prost::alloc::string::String,
+    /// Empty lets the engine choose a random name.
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    /// Replaces the image's command; empty keeps it.
+    #[prost(string, repeated, tag = "3")]
+    pub command: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Replaces the image's entrypoint; empty keeps it.
+    #[prost(string, repeated, tag = "4")]
+    pub entrypoint: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// VAR=value entries added to the image's environment.
+    #[prost(string, repeated, tag = "5")]
+    pub env: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(message, repeated, tag = "6")]
+    pub ports: ::prost::alloc::vec::Vec<PortPublication>,
+    #[prost(message, repeated, tag = "7")]
+    pub mounts: ::prost::alloc::vec::Vec<MountSpec>,
+    /// Network to attach to; empty means the engine's default bridge.
+    #[prost(string, tag = "8")]
+    pub network: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "9")]
+    pub restart_policy: ::core::option::Option<RestartPolicy>,
+    /// Deletes the container when it exits.
+    #[prost(bool, tag = "10")]
+    pub auto_remove: bool,
+    #[prost(map = "string, string", tag = "11")]
+    pub labels: ::std::collections::HashMap<
+        ::prost::alloc::string::String,
+        ::prost::alloc::string::String,
+    >,
+    /// Allocates a pseudo-terminal and keeps standard input open, as `docker run -it` does.
+    #[prost(bool, tag = "12")]
+    pub interactive: bool,
+    /// Empty means the image's working directory.
+    #[prost(string, tag = "13")]
+    pub working_dir: ::prost::alloc::string::String,
+    /// Empty means the image's user.
+    #[prost(string, tag = "14")]
+    pub user: ::prost::alloc::string::String,
+    /// Platform such as "linux/arm64"; empty means the engine's own.
+    #[prost(string, tag = "15")]
+    pub platform: ::prost::alloc::string::String,
+    /// Starts the container once created.
+    #[prost(bool, tag = "16")]
+    pub start: bool,
+}
+/// A container port to publish on the host.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PortPublication {
+    #[prost(uint32, tag = "1")]
+    pub container_port: u32,
+    #[prost(enumeration = "Protocol", tag = "2")]
+    pub protocol: i32,
+    /// Zero lets the engine choose a free host port.
+    #[prost(uint32, tag = "3")]
+    pub host_port: u32,
+    /// Empty publishes on every host address.
+    #[prost(string, tag = "4")]
+    pub host_ip: ::prost::alloc::string::String,
+}
+/// A filesystem to mount into a new container.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct MountSpec {
+    /// BIND, VOLUME or TMPFS.
+    #[prost(enumeration = "MountKind", tag = "1")]
+    pub kind: i32,
+    /// Host path for BIND, as the client's operating system writes it; volume name for VOLUME, where empty creates an
+    /// anonymous volume; empty for TMPFS.
+    #[prost(string, tag = "2")]
+    pub source: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub destination: ::prost::alloc::string::String,
+    #[prost(bool, tag = "4")]
+    pub read_only: bool,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CreateContainerResponse {
+    #[prost(string, tag = "1")]
+    pub id: ::prost::alloc::string::String,
+    /// Warnings the engine returned, such as an ignored option.
+    #[prost(string, repeated, tag = "2")]
+    pub warnings: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PruneContainersRequest {}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PruneContainersResponse {
+    #[prost(string, repeated, tag = "1")]
+    pub deleted_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(uint64, tag = "2")]
+    pub reclaimed_bytes: u64,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PauseContainerRequest {
+    #[prost(string, tag = "1")]
+    pub id: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PauseContainerResponse {}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UnpauseContainerRequest {
+    #[prost(string, tag = "1")]
+    pub id: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UnpauseContainerResponse {}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct KillContainerRequest {
+    #[prost(string, tag = "1")]
+    pub id: ::prost::alloc::string::String,
+    /// Signal name such as "SIGTERM" or number such as "15"; empty sends SIGKILL.
+    #[prost(string, tag = "2")]
+    pub signal: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct KillContainerResponse {}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RenameContainerRequest {
+    #[prost(string, tag = "1")]
+    pub id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RenameContainerResponse {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum ContainerState {
@@ -401,6 +569,41 @@ impl Protocol {
             "PROTOCOL_TCP" => Some(Self::Tcp),
             "PROTOCOL_UDP" => Some(Self::Udp),
             "PROTOCOL_SCTP" => Some(Self::Sctp),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum RestartMode {
+    Unspecified = 0,
+    No = 1,
+    Always = 2,
+    UnlessStopped = 3,
+    OnFailure = 4,
+}
+impl RestartMode {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "RESTART_MODE_UNSPECIFIED",
+            Self::No => "RESTART_MODE_NO",
+            Self::Always => "RESTART_MODE_ALWAYS",
+            Self::UnlessStopped => "RESTART_MODE_UNLESS_STOPPED",
+            Self::OnFailure => "RESTART_MODE_ON_FAILURE",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "RESTART_MODE_UNSPECIFIED" => Some(Self::Unspecified),
+            "RESTART_MODE_NO" => Some(Self::No),
+            "RESTART_MODE_ALWAYS" => Some(Self::Always),
+            "RESTART_MODE_UNLESS_STOPPED" => Some(Self::UnlessStopped),
+            "RESTART_MODE_ON_FAILURE" => Some(Self::OnFailure),
             _ => None,
         }
     }
@@ -892,6 +1095,187 @@ pub mod containers_service_client {
                 );
             self.inner.streaming(req, path, codec).await
         }
+        /// Creates a container from a local image and, when asked, starts it; fails with NOT_FOUND when the image is not
+        /// local. On Windows, bind sources are Windows paths. A container that cannot start is removed and the call fails.
+        pub async fn create_container(
+            &mut self,
+            request: impl tonic::IntoRequest<super::CreateContainerRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::CreateContainerResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.containers.v1.ContainersService/CreateContainer",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "contr.containers.v1.ContainersService",
+                        "CreateContainer",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        /// Deletes every stopped container.
+        pub async fn prune_containers(
+            &mut self,
+            request: impl tonic::IntoRequest<super::PruneContainersRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::PruneContainersResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.containers.v1.ContainersService/PruneContainers",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "contr.containers.v1.ContainersService",
+                        "PruneContainers",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        /// Freezes every process of a running container.
+        pub async fn pause_container(
+            &mut self,
+            request: impl tonic::IntoRequest<super::PauseContainerRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::PauseContainerResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.containers.v1.ContainersService/PauseContainer",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "contr.containers.v1.ContainersService",
+                        "PauseContainer",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        /// Resumes a paused container.
+        pub async fn unpause_container(
+            &mut self,
+            request: impl tonic::IntoRequest<super::UnpauseContainerRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::UnpauseContainerResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.containers.v1.ContainersService/UnpauseContainer",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "contr.containers.v1.ContainersService",
+                        "UnpauseContainer",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        /// Sends a signal to the container's main process.
+        pub async fn kill_container(
+            &mut self,
+            request: impl tonic::IntoRequest<super::KillContainerRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::KillContainerResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.containers.v1.ContainersService/KillContainer",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "contr.containers.v1.ContainersService",
+                        "KillContainer",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        /// Gives a container a new name; fails with FAILED_PRECONDITION when another container has it.
+        pub async fn rename_container(
+            &mut self,
+            request: impl tonic::IntoRequest<super::RenameContainerRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RenameContainerResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.containers.v1.ContainersService/RenameContainer",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "contr.containers.v1.ContainersService",
+                        "RenameContainer",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -1006,6 +1390,55 @@ pub mod containers_service_server {
             &self,
             request: tonic::Request<tonic::Streaming<super::ExecRequest>>,
         ) -> std::result::Result<tonic::Response<Self::ExecStream>, tonic::Status>;
+        /// Creates a container from a local image and, when asked, starts it; fails with NOT_FOUND when the image is not
+        /// local. On Windows, bind sources are Windows paths. A container that cannot start is removed and the call fails.
+        async fn create_container(
+            &self,
+            request: tonic::Request<super::CreateContainerRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::CreateContainerResponse>,
+            tonic::Status,
+        >;
+        /// Deletes every stopped container.
+        async fn prune_containers(
+            &self,
+            request: tonic::Request<super::PruneContainersRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::PruneContainersResponse>,
+            tonic::Status,
+        >;
+        /// Freezes every process of a running container.
+        async fn pause_container(
+            &self,
+            request: tonic::Request<super::PauseContainerRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::PauseContainerResponse>,
+            tonic::Status,
+        >;
+        /// Resumes a paused container.
+        async fn unpause_container(
+            &self,
+            request: tonic::Request<super::UnpauseContainerRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::UnpauseContainerResponse>,
+            tonic::Status,
+        >;
+        /// Sends a signal to the container's main process.
+        async fn kill_container(
+            &self,
+            request: tonic::Request<super::KillContainerRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::KillContainerResponse>,
+            tonic::Status,
+        >;
+        /// Gives a container a new name; fails with FAILED_PRECONDITION when another container has it.
+        async fn rename_container(
+            &self,
+            request: tonic::Request<super::RenameContainerRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RenameContainerResponse>,
+            tonic::Status,
+        >;
     }
     /// Containers of the running engine. Container arguments accept an ID, a unique ID prefix or a name; every RPC fails
     /// with ENGINE_NOT_RUNNING while the engine is not running.
@@ -1544,6 +1977,282 @@ pub mod containers_service_server {
                                 max_encoding_message_size,
                             );
                         let res = grpc.streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.containers.v1.ContainersService/CreateContainer" => {
+                    #[allow(non_camel_case_types)]
+                    struct CreateContainerSvc<T: ContainersService>(pub Arc<T>);
+                    impl<
+                        T: ContainersService,
+                    > tonic::server::UnaryService<super::CreateContainerRequest>
+                    for CreateContainerSvc<T> {
+                        type Response = super::CreateContainerResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::CreateContainerRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ContainersService>::create_container(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = CreateContainerSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.containers.v1.ContainersService/PruneContainers" => {
+                    #[allow(non_camel_case_types)]
+                    struct PruneContainersSvc<T: ContainersService>(pub Arc<T>);
+                    impl<
+                        T: ContainersService,
+                    > tonic::server::UnaryService<super::PruneContainersRequest>
+                    for PruneContainersSvc<T> {
+                        type Response = super::PruneContainersResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::PruneContainersRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ContainersService>::prune_containers(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = PruneContainersSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.containers.v1.ContainersService/PauseContainer" => {
+                    #[allow(non_camel_case_types)]
+                    struct PauseContainerSvc<T: ContainersService>(pub Arc<T>);
+                    impl<
+                        T: ContainersService,
+                    > tonic::server::UnaryService<super::PauseContainerRequest>
+                    for PauseContainerSvc<T> {
+                        type Response = super::PauseContainerResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::PauseContainerRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ContainersService>::pause_container(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = PauseContainerSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.containers.v1.ContainersService/UnpauseContainer" => {
+                    #[allow(non_camel_case_types)]
+                    struct UnpauseContainerSvc<T: ContainersService>(pub Arc<T>);
+                    impl<
+                        T: ContainersService,
+                    > tonic::server::UnaryService<super::UnpauseContainerRequest>
+                    for UnpauseContainerSvc<T> {
+                        type Response = super::UnpauseContainerResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::UnpauseContainerRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ContainersService>::unpause_container(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = UnpauseContainerSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.containers.v1.ContainersService/KillContainer" => {
+                    #[allow(non_camel_case_types)]
+                    struct KillContainerSvc<T: ContainersService>(pub Arc<T>);
+                    impl<
+                        T: ContainersService,
+                    > tonic::server::UnaryService<super::KillContainerRequest>
+                    for KillContainerSvc<T> {
+                        type Response = super::KillContainerResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::KillContainerRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ContainersService>::kill_container(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = KillContainerSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.containers.v1.ContainersService/RenameContainer" => {
+                    #[allow(non_camel_case_types)]
+                    struct RenameContainerSvc<T: ContainersService>(pub Arc<T>);
+                    impl<
+                        T: ContainersService,
+                    > tonic::server::UnaryService<super::RenameContainerRequest>
+                    for RenameContainerSvc<T> {
+                        type Response = super::RenameContainerResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::RenameContainerRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ContainersService>::rename_container(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = RenameContainerSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
                         Ok(res)
                     };
                     Box::pin(fut)
