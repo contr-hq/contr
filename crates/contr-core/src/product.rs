@@ -24,6 +24,9 @@ pub const HELPER_BINARY: &str = "contr-helper";
 /// Where Linux packages install the privileged helper; the polkit policy authorizes this path only.
 pub const INSTALLED_HELPER: &str = "/usr/libexec/contr/contr-helper";
 
+/// Linux package of the daemon, the CLI and the helper; client packages depend on it by this name.
+pub const DAEMON_PACKAGE: &str = "contr-daemon";
+
 /// Docker CLI context that points at the engine Contr manages.
 pub const DOCKER_CONTEXT: &str = "contr";
 

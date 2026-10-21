@@ -1,0 +1,78 @@
+# Debian and RPM packages of the daemon, the CLI and the privileged helper. `cargo xtask package-linux` runs nfpm in
+# package.Dockerfile, where archive/ holds what `cargo xtask dist-linux` assembles and linux/ holds this directory.
+name: contr-daemon
+arch: amd64
+platform: linux
+version: ${VERSION}
+version_schema: semver
+section: admin
+priority: optional
+maintainer: Contr <contr-hq@users.noreply.github.com>
+vendor: Contr
+homepage: https://github.com/contr-hq/contr
+license: Apache-2.0
+description: |-
+  Runs containers on the host's Docker Engine and manages the engine.
+  The contrd daemon serves the Contr apps over gRPC from a per-user socket, contr is its command-line interface, and
+  contr-helper installs the engine or adds the user to its group behind a polkit password prompt.
+
+contents:
+  # RPM removes only the directories a package owns.
+  - dst: /usr/libexec/contr
+    type: dir
+    file_info: {mode: 0755}
+  - dst: /usr/share/doc/contr-daemon
+    type: dir
+    file_info: {mode: 0755}
+  - dst: /usr/share/licenses/contr-daemon
+    type: dir
+    file_info: {mode: 0755}
+    packager: rpm
+  - src: archive/contrd
+    dst: /usr/bin/contrd
+    file_info: {mode: 0755}
+  - src: archive/contr
+    dst: /usr/bin/contr
+    file_info: {mode: 0755}
+  - src: archive/contr-helper
+    dst: /usr/libexec/contr/contr-helper
+    file_info: {mode: 0755}
+  - src: linux/systemd/contrd.service
+    dst: /usr/lib/systemd/user/contrd.service
+    file_info: {mode: 0644}
+  - src: linux/systemd/contrd.socket
+    dst: /usr/lib/systemd/user/contrd.socket
+    file_info: {mode: 0644}
+  - src: linux/polkit/io.github.contr_hq.contr.policy
+    dst: /usr/share/polkit-1/actions/io.github.contr_hq.contr.policy
+    file_info: {mode: 0644}
+  - src: archive/THIRD-PARTY-NOTICES.md
+    dst: /usr/share/doc/contr-daemon/THIRD-PARTY-NOTICES.md
+    file_info: {mode: 0644}
+  - src: archive/licenses
+    dst: /usr/share/doc/contr-daemon/licenses
+    type: tree
+  - src: archive/LICENSE
+    dst: /usr/share/doc/contr-daemon/copyright
+    file_info: {mode: 0644}
+    packager: deb
+  - src: archive/LICENSE
+    dst: /usr/share/licenses/contr-daemon/LICENSE
+    type: license
+    file_info: {mode: 0644}
+    packager: rpm
+
+scripts:
+  postinstall: linux/scripts/postinstall.sh
+  preremove: linux/scripts/preremove.sh
+
+overrides:
+  deb:
+    # The release builds on ubuntu-24.04, whose glibc is 2.39; see .github/workflows/release.yml.
+    depends: [libc6 (>= 2.39)]
+    recommends: [pkexec | policykit-1]
+    suggests: [docker.io]
+  rpm:
+    depends: [glibc >= 2.39]
+    recommends: [polkit]
+    suggests: [moby-engine]

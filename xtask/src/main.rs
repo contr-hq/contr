@@ -4,6 +4,7 @@ mod dist;
 mod docker;
 mod guest;
 mod guest_sources;
+mod linux_packages;
 mod notices;
 mod windows_cli;
 
@@ -42,12 +43,21 @@ enum Task {
         #[arg(long, default_value = "target/dist")]
         out: PathBuf,
     },
-    /// Assemble the Linux archive from Linux builds of contrd and contr.
+    /// Assemble the Linux archive from Linux builds of contrd, contr and contr-helper.
     DistLinux {
-        /// Directory holding contrd and contr built for Linux.
+        /// Directory holding contrd, contr and contr-helper built for Linux.
         #[arg(long)]
         binaries: PathBuf,
         /// Directory that receives the archive.
+        #[arg(long, default_value = "target/dist")]
+        out: PathBuf,
+    },
+    /// Build the Debian and RPM packages from the Linux archive `dist-linux` assembled in `out`.
+    PackageLinux {
+        /// Semantic version of the packages, such as 0.1.0-alpha.1.
+        #[arg(long, default_value = env!("CARGO_PKG_VERSION"))]
+        version: String,
+        /// Directory holding the Linux archive, which receives the packages.
         #[arg(long, default_value = "target/dist")]
         out: PathBuf,
     },
@@ -66,6 +76,7 @@ fn main() -> anyhow::Result<()> {
         Task::GuestSources => guest_sources::fetch(&root)?,
         Task::DistWindows { binaries, out } => dist::windows(&root, &binaries, &out)?,
         Task::DistLinux { binaries, out } => dist::linux(&root, &binaries, &out)?,
+        Task::PackageLinux { version, out } => linux_packages::build(&root, &version, &out)?,
     }
 
     Ok(())
