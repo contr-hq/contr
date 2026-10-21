@@ -9,6 +9,7 @@ mod kube;
 mod settings;
 mod wsl;
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::Context;
@@ -65,6 +66,12 @@ enum Command {
         /// Identifier `doctor` prints, such as install-wsl.
         action_id: String,
     },
+    /// Save a diagnostics bundle for support, with credentials and your name replaced.
+    Bundle {
+        /// Zip file to write instead of a new one in the current directory.
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+    },
     /// Show or change which of your WSL distributions reach the engine.
     #[command(subcommand)]
     Wsl(wsl::WslCommand),
@@ -110,6 +117,7 @@ async fn run(command: Command) -> anyhow::Result<i32> {
         Command::Settings { command } => settings::run(&Client::connect_or_start(&identity).await?, command).await,
         Command::Doctor => doctor::doctor(&Client::connect_or_start(&identity).await?).await,
         Command::Fix { action_id } => doctor::fix(&Client::connect_or_start(&identity).await?, action_id).await,
+        Command::Bundle { output } => doctor::bundle(&Client::connect_or_start(&identity).await?, output).await,
     }
 }
 

@@ -1,6 +1,12 @@
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use anyhow::Context;
 use contr_core::product;
 use contr_sdk::api::diagnostics::v1::run_remediation_response::Event;
-use contr_sdk::api::diagnostics::v1::{Check, CheckStatus, RunChecksRequest, RunRemediationRequest};
+use contr_sdk::api::diagnostics::v1::{
+    Check, CheckStatus, CreateBundleRequest, RunChecksRequest, RunRemediationRequest, create_bundle_response,
+};
 use contr_sdk::{Client, Error};
 
 use crate::format;
@@ -59,6 +65,40 @@ pub(crate) async fn fix(client: &Client, action_id: String) -> anyhow::Result<i3
             None => {}
         }
     }
+
+    Ok(0)
+}
+
+/// Writes a diagnostics bundle to `output`, or to a new file in the current directory.
+pub(crate) async fn bundle(client: &Client, output: Option<PathBuf>) -> anyhow::Result<i32> {
+    let mut events = client
+        .diagnostics()
+        .create_bundle(CreateBundleRequest {})
+        .await
+        .map_err(Error::from)?
+        .into_inner();
+    let mut zip = Vec::new();
+    while let Some(event) = events.message().await.map_err(Error::from)? {
+        match event.event {
+            Some(create_bundle_response::Event::Progress(progress)) => eprintln!("{}", progress.message),
+            Some(create_bundle_response::Event::Chunk(chunk)) => zip.extend_from_slice(&chunk),
+            None => {}
+        }
+    }
+
+    let path = output.unwrap_or_else(|| {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|since| since.as_secs())
+            .unwrap_or_default();
+        PathBuf::from(format!("{}-diagnostics-{now}.zip", product::SLUG))
+    });
+    std::fs::write(&path, &zip).with_context(|| format!("cannot write {}", path.display()))?;
+    println!(
+        "Saved {}. Credentials, your name, home directory and computer name are replaced; look through it before \
+         you share it.",
+        path.display()
+    );
 
     Ok(0)
 }
