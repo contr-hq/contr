@@ -213,6 +213,9 @@ pub struct Settings {
     /// WSL distributions of the user that reach the engine.
     #[serde(default)]
     pub wsl_integrations: BTreeSet<String>,
+    /// Compose projects the user added, each by its Compose files.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compose_projects: Vec<ComposeProject>,
     #[serde(flatten)]
     stored: Map<String, Value>,
 }
@@ -244,6 +247,14 @@ impl Settings {
 
         stored
     }
+}
+
+/// A Compose project the user added.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposeProject {
+    /// Compose files in the order Compose merges them.
+    pub config_files: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -564,6 +575,9 @@ mod tests {
 
         let mut settings = file.load().unwrap();
         settings.wsl_integrations.insert("Ubuntu".to_owned());
+        settings.compose_projects.push(ComposeProject {
+            config_files: vec![r"C:\src\shop\compose.yaml".to_owned()],
+        });
         settings.set("engine.start_with_daemon", json!(true)).unwrap();
         file.save(&settings).unwrap();
 
@@ -571,6 +585,10 @@ mod tests {
         assert_eq!(written["wslIntegrations"], json!(["Debian", "Ubuntu"]));
         assert_eq!(written["futureKey"]["on"], true);
         assert_eq!(written["engine"]["startWithDaemon"], true);
+        assert_eq!(
+            written["composeProjects"],
+            json!([{"configFiles": [r"C:\src\shop\compose.yaml"]}])
+        );
         assert_eq!(file.load().unwrap(), settings);
     }
 

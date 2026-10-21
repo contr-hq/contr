@@ -44,6 +44,9 @@ struct Args {
     /// File holding the administrator's settings instead of the system's policy location.
     #[arg(long)]
     admin_settings: Option<PathBuf>,
+    /// Compose CLI plugin to run instead of the bundled one or the one the Docker CLI would run.
+    #[arg(long)]
+    compose: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -92,6 +95,7 @@ fn main() -> anyhow::Result<()> {
         admin_settings: args.admin_settings,
         cli_dir: args.cli_dir,
         docker_context: !args.no_docker_context,
+        compose: args.compose,
     };
 
     tokio::runtime::Builder::new_multi_thread()

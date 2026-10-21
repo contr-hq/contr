@@ -81,6 +81,7 @@ impl Backend for WslBackend {
             Capability::WslIntegration,
             Capability::Reset,
             Capability::EngineConfiguration,
+            Capability::Compose,
         ]
     }
 

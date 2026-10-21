@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use async_trait::async_trait;
+use contr_api::compose::v1::compose_service_server::ComposeServiceServer;
 use contr_api::containers::v1::containers_service_server::ContainersServiceServer;
 use contr_api::daemon::v1::daemon_service_server::DaemonServiceServer;
 use contr_api::diagnostics::v1::diagnostics_service_server::DiagnosticsServiceServer;
@@ -27,8 +28,8 @@ use contr_transport::{DiscoveryFile, Endpoint, Listener, TransportError};
 use tonic::transport::Server;
 
 use crate::services::{
-    CliLocations, ContainersApi, DaemonApi, DiagnosticsApi, EngineApi, ImagesApi, IntegrationApi, NetworksApi,
-    SettingsApi, Shared, VolumesApi, WslAccess,
+    CliLocations, ComposeApi, ContainersApi, DaemonApi, DiagnosticsApi, EngineApi, ImagesApi, IntegrationApi,
+    NetworksApi, SettingsApi, Shared, VolumesApi, WslAccess,
 };
 use crate::settings::SettingsHub;
 use crate::slot::{DockerContext, EngineSlot};
@@ -68,6 +69,8 @@ pub struct Config {
     pub settings_file: Option<PathBuf>,
     /// File holding the administrator's settings instead of the system's policy location.
     pub admin_settings: Option<PathBuf>,
+    /// Compose CLI plugin instead of the bundled one or the one the Docker CLI would run.
+    pub compose: Option<PathBuf>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -148,6 +151,10 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
         .add_service(DiagnosticsServiceServer::new(DiagnosticsApi(Arc::clone(&shared))))
         .add_service(SettingsServiceServer::new(SettingsApi(Arc::clone(&shared))))
         .add_service(VolumesServiceServer::new(VolumesApi(Arc::clone(&shared))))
+        .add_service(ComposeServiceServer::new(ComposeApi::new(
+            Arc::clone(&shared),
+            config.compose.clone(),
+        )))
         .add_service(NetworksServiceServer::new(NetworksApi(shared)))
         .serve_with_incoming_shutdown(listener.incoming(), shutdown)
         .await;

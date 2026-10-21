@@ -2,6 +2,7 @@ use std::future::Future;
 use std::time::Duration;
 
 use contr_api::API_REVISION;
+use contr_api::compose::v1::compose_service_client::ComposeServiceClient;
 use contr_api::containers::v1::containers_service_client::ContainersServiceClient;
 use contr_api::containers::v1::{Container, ExecStart, ListContainersRequest};
 use contr_api::daemon::v1::daemon_service_client::DaemonServiceClient;
@@ -136,6 +137,11 @@ impl Client {
     /// Networks service.
     pub fn networks(&self) -> NetworksServiceClient<Channel> {
         NetworksServiceClient::new(self.channel.clone())
+    }
+
+    /// Compose projects service.
+    pub fn compose(&self) -> ComposeServiceClient<Channel> {
+        ComposeServiceClient::new(self.channel.clone())
     }
 
     /// Daemon and engine description.
