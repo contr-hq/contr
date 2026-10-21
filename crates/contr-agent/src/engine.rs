@@ -13,9 +13,9 @@ use tokio::process::{Child, Command};
 use tokio::signal::unix::{SignalKind, signal};
 
 use crate::mounts::is_mount_point;
-use crate::{host, share};
+use crate::{configure, host, share};
 
-const DOCKERD: &str = "/usr/local/bin/dockerd";
+pub(crate) const DOCKERD: &str = "/usr/local/bin/dockerd";
 const LOG_DIR: &str = "/var/log/contr";
 const SEARCH_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 const STOP_GRACE: Duration = Duration::from_secs(30);
@@ -172,8 +172,13 @@ fn spawn_dockerd(data_root: &Path, share: bool) -> anyhow::Result<Child> {
             .arg(format!("unix://{}", guest::SHARED_ENGINE_SOCKET));
     }
     command.arg("--host-gateway-ip").arg(guest::HOST_ADDRESS.to_string());
+    if let Some(daemon) = configure::daemon_file() {
+        command.arg("--config-file").arg(daemon);
+    }
+    // Go reads SSL_CERT_DIR in place of /etc/ssl/certs, and still reads the guest's bundle file.
     let child = command
         .env("PATH", SEARCH_PATH)
+        .env("SSL_CERT_DIR", configure::certificates_dir())
         .stdin(Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log)
