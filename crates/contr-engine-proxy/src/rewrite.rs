@@ -1,5 +1,10 @@
+use std::borrow::Cow;
+
+use contr_core::proxy::Proxy;
 use http::Method;
 use serde_json::{Map, Value};
+
+use crate::variables::ProxyVariables;
 
 const HOST_ALIAS: &str = "host.docker.internal";
 const HOST_ALIAS_ENTRY: &str = "host.docker.internal:host-gateway";
@@ -8,6 +13,8 @@ const HOST_ALIAS_ENTRY: &str = "host.docker.internal:host-gateway";
 const SHARED_MOUNTS: &str = "/mnt";
 /// Sources that name the engine socket, which means the same in the client's distribution and in the guest.
 const ENGINE_SOCKETS: [&str; 2] = ["/var/run/docker.sock", "/run/docker.sock"];
+/// Query parameter of `/build` that holds the build arguments as a JSON object.
+const BUILD_ARGS: &str = "buildargs";
 
 /// How container definitions from clients outside the engine's Linux guest are adjusted for it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,11 +27,38 @@ pub struct Rewrites {
     pub distro_root: Option<String>,
     /// Maps `host.docker.internal` to the engine's host gateway in containers that do not name it themselves.
     pub host_alias: bool,
+    /// Proxy that new containers and builds receive as `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` unless they set
+    /// the variable themselves; its servers must be reachable from the guest.
+    pub proxy: Option<Proxy>,
 }
 
-/// Whether the request creates a container, the only request whose body is rewritten.
-pub(crate) fn targets(method: &Method, path: &str) -> bool {
-    method == Method::POST && unversioned(path) == "/containers/create"
+impl Rewrites {
+    pub(crate) fn proxy_variables(&self) -> Option<ProxyVariables> {
+        self.proxy.as_ref().and_then(ProxyVariables::of)
+    }
+}
+
+/// Requests whose content the proxy may change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Target {
+    ContainerCreate,
+    /// The classic build endpoint, whose query carries the build arguments.
+    Build,
+    /// BuildKit's gRPC API, which the client reaches by upgrading the connection to HTTP/2.
+    BuildKit,
+}
+
+pub(crate) fn target(method: &Method, path: &str) -> Option<Target> {
+    if method != Method::POST {
+        return None;
+    }
+
+    match unversioned(path) {
+        "/containers/create" => Some(Target::ContainerCreate),
+        "/build" => Some(Target::Build),
+        "/grpc" => Some(Target::BuildKit),
+        _ => None,
+    }
 }
 
 /// `path` without its `/v1.52`-style API version prefix.
@@ -43,19 +77,89 @@ fn unversioned(path: &str) -> &str {
 /// Rewritten container definition, or `None` when `body` needs no change or is not a JSON object.
 pub(crate) fn container_create(body: &[u8], rewrites: &Rewrites) -> Option<Vec<u8>> {
     let mut definition: Value = serde_json::from_slice(body).ok()?;
-    let host_config = definition
-        .as_object_mut()?
+    let fields = definition.as_object_mut()?;
+    let mut changed = match rewrites.proxy_variables() {
+        Some(variables) => add_variables(fields, &variables),
+        None => false,
+    };
+    let host_config = fields
         .entry("HostConfig")
         .or_insert_with(|| Value::Object(Map::new()))
         .as_object_mut()?;
 
-    let mut changed = rewrite_binds(host_config, rewrites);
+    changed |= rewrite_binds(host_config, rewrites);
     changed |= rewrite_mounts(host_config, rewrites);
     if rewrites.host_alias {
         changed |= add_host_alias(host_config);
     }
 
     changed.then(|| serde_json::to_vec(&definition).ok()).flatten()
+}
+
+/// Appends the proxy variables the definition's `Env` does not set.
+fn add_variables(definition: &mut Map<String, Value>, variables: &ProxyVariables) -> bool {
+    let env = definition
+        .entry("Env")
+        .and_modify(|env| {
+            if env.is_null() {
+                *env = Value::Array(Vec::new());
+            }
+        })
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let Some(env) = env.as_array_mut() else {
+        return false;
+    };
+    let defined: Vec<&str> = env
+        .iter()
+        .filter_map(Value::as_str)
+        .map(|entry| entry.split_once('=').map_or(entry, |(name, _)| name))
+        .collect();
+    let missing: Vec<Value> = variables
+        .missing(&defined)
+        .into_iter()
+        .map(|(name, value)| Value::String(format!("{name}={value}")))
+        .collect();
+    if missing.is_empty() {
+        return false;
+    }
+
+    env.extend(missing);
+    true
+}
+
+/// Query of a `/build` request with the proxy variables its build arguments do not set added to them, or `None` when
+/// it needs no change or its build arguments are not a JSON object. Every other parameter keeps its encoding.
+pub(crate) fn build_query(query: &str, variables: &ProxyVariables) -> Option<String> {
+    let mut pieces: Vec<&str> = query.split('&').filter(|piece| !piece.is_empty()).collect();
+    let position = pieces
+        .iter()
+        .position(|piece| parameter(piece).is_some_and(|(name, _)| name == BUILD_ARGS));
+    let mut args = match position.and_then(|index| parameter(pieces[index])) {
+        Some((_, value)) => match serde_json::from_str(&value).ok()? {
+            Value::Object(args) => args,
+            Value::Null => Map::new(),
+            _ => return None,
+        },
+        None => Map::new(),
+    };
+    let defined: Vec<&str> = args.keys().map(String::as_str).collect();
+    let missing: Vec<(String, Value)> = variables
+        .missing(&defined)
+        .into_iter()
+        .map(|(name, value)| (name, Value::String(value.to_owned())))
+        .collect();
+    if missing.is_empty() {
+        return None;
+    }
+    args.extend(missing);
+
+    let encoded: String = form_urlencoded::byte_serialize(Value::Object(args).to_string().as_bytes()).collect();
+    let replacement = format!("{BUILD_ARGS}={encoded}");
+    match position {
+        Some(index) => pieces[index] = &replacement,
+        None => pieces.push(&replacement),
+    }
+    Some(pieces.join("&"))
 }
 
 fn rewrite_binds(host_config: &mut Map<String, Value>, rewrites: &Rewrites) -> bool {
@@ -129,6 +233,10 @@ fn add_host_alias(host_config: &mut Map<String, Value>) -> bool {
     true
 }
 
+fn parameter(piece: &str) -> Option<(Cow<'_, str>, Cow<'_, str>)> {
+    form_urlencoded::parse(piece.as_bytes()).next()
+}
+
 /// Guest path of a bind source, or `None` when the guest reads it as written.
 fn guest_path(source: &str, rewrites: &Rewrites) -> Option<String> {
     windows_path(source, &rewrites.drives_root).or_else(|| distro_path(source, rewrites.distro_root.as_deref()?))
@@ -193,6 +301,18 @@ mod tests {
             drives_root: "/mnt".to_owned(),
             distro_root: None,
             host_alias,
+            proxy: None,
+        }
+    }
+
+    fn proxied() -> Rewrites {
+        Rewrites {
+            proxy: Some(Proxy {
+                http: Some("http://198.19.255.254:3128".to_owned()),
+                https: Some("http://proxy.corp:8080".to_owned()),
+                exclude: vec!["localhost".to_owned(), ".corp".to_owned()],
+            }),
+            ..rewrites(false)
         }
     }
 
@@ -209,12 +329,21 @@ mod tests {
     }
 
     #[test]
-    fn targets_only_container_creation() {
-        assert!(targets(&Method::POST, "/containers/create"));
-        assert!(targets(&Method::POST, "/v1.52/containers/create"));
-        assert!(!targets(&Method::GET, "/v1.52/containers/create"));
-        assert!(!targets(&Method::POST, "/v1.52/containers/abc/start"));
-        assert!(!targets(&Method::POST, "/vx/containers/create"));
+    fn targets_container_creation_and_builds() {
+        assert_eq!(
+            target(&Method::POST, "/containers/create"),
+            Some(Target::ContainerCreate)
+        );
+        assert_eq!(
+            target(&Method::POST, "/v1.52/containers/create"),
+            Some(Target::ContainerCreate)
+        );
+        assert_eq!(target(&Method::POST, "/v1.52/build"), Some(Target::Build));
+        assert_eq!(target(&Method::POST, "/v1.52/grpc"), Some(Target::BuildKit));
+        assert_eq!(target(&Method::GET, "/v1.52/containers/create"), None);
+        assert_eq!(target(&Method::POST, "/v1.52/containers/abc/start"), None);
+        assert_eq!(target(&Method::POST, "/vx/containers/create"), None);
+        assert_eq!(target(&Method::POST, "/v1.52/session"), None);
     }
 
     #[test]
@@ -308,6 +437,98 @@ mod tests {
         let definition = json!({"HostConfig": {"NetworkMode": "container:web"}});
 
         assert_eq!(rewritten(&definition, true), None);
+    }
+
+    #[test]
+    fn adds_the_proxy_variables_a_container_does_not_set() {
+        let definition = json!({"Image": "alpine", "Env": ["PATH=/bin", "https_proxy=http://mine:1", "NO_PROXY"]});
+        let body = serde_json::to_vec(&definition).unwrap();
+
+        let result: Value = serde_json::from_slice(&container_create(&body, &proxied()).unwrap()).unwrap();
+
+        assert_eq!(
+            result["Env"],
+            json!([
+                "PATH=/bin",
+                "https_proxy=http://mine:1",
+                "NO_PROXY",
+                "HTTP_PROXY=http://198.19.255.254:3128",
+                "http_proxy=http://198.19.255.254:3128",
+            ])
+        );
+    }
+
+    #[test]
+    fn creates_the_environment_for_the_proxy_variables() {
+        for definition in [json!({"Image": "alpine"}), json!({"Image": "alpine", "Env": null})] {
+            let body = serde_json::to_vec(&definition).unwrap();
+
+            let result: Value = serde_json::from_slice(&container_create(&body, &proxied()).unwrap()).unwrap();
+
+            assert_eq!(
+                result["Env"],
+                json!([
+                    "HTTP_PROXY=http://198.19.255.254:3128",
+                    "http_proxy=http://198.19.255.254:3128",
+                    "HTTPS_PROXY=http://proxy.corp:8080",
+                    "https_proxy=http://proxy.corp:8080",
+                    "NO_PROXY=localhost,.corp",
+                    "no_proxy=localhost,.corp",
+                ])
+            );
+        }
+    }
+
+    #[test]
+    fn leaves_containers_alone_without_a_proxy() {
+        let direct = Rewrites {
+            proxy: Some(Proxy::default()),
+            ..rewrites(false)
+        };
+
+        assert_eq!(container_create(br#"{"Image": "alpine"}"#, &direct), None);
+        assert_eq!(container_create(br#"{"Image": "alpine"}"#, &rewrites(false)), None);
+    }
+
+    fn build_args(query: &str) -> Value {
+        let (_, value) = form_urlencoded::parse(query.as_bytes())
+            .find(|(name, _)| name == BUILD_ARGS)
+            .unwrap();
+        serde_json::from_str(&value).unwrap()
+    }
+
+    #[test]
+    fn adds_the_proxy_to_the_build_arguments_and_keeps_other_parameters() {
+        let variables = proxied().proxy_variables().unwrap();
+        let query =
+            "t=app%3Alatest&buildargs=%7B%22HTTP_PROXY%22%3A%22http%3A%2F%2Fmine%3A1%22%2C%22V%22%3Anull%7D&q=1";
+
+        let rewritten = build_query(query, &variables).unwrap();
+
+        assert!(rewritten.starts_with("t=app%3Alatest&buildargs="), "{rewritten}");
+        assert!(rewritten.ends_with("&q=1"), "{rewritten}");
+        assert_eq!(
+            build_args(&rewritten),
+            json!({
+                "HTTP_PROXY": "http://mine:1",
+                "V": null,
+                "HTTPS_PROXY": "http://proxy.corp:8080",
+                "https_proxy": "http://proxy.corp:8080",
+                "NO_PROXY": "localhost,.corp",
+                "no_proxy": "localhost,.corp",
+            })
+        );
+    }
+
+    #[test]
+    fn adds_build_arguments_to_builds_without_them() {
+        let variables = proxied().proxy_variables().unwrap();
+
+        let rewritten = build_query("", &variables).unwrap();
+
+        assert_eq!(build_args(&rewritten)["http_proxy"], "http://198.19.255.254:3128");
+        assert_eq!(build_query("buildargs=%5B%5D", &variables), None);
+        assert_eq!(build_query("buildargs=nope", &variables), None);
     }
 
     #[test]

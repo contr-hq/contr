@@ -483,6 +483,9 @@ name = "contr-engine-proxy"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "contr-core",
+ "form_urlencoded",
+ "futures-util",
  "http",
  "http-body-util",
  "hyper",
