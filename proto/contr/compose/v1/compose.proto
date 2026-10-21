@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+package contr.compose.v1;
+
+import "contr/containers/v1/containers.proto";
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Contr.Sdk.Compose.V1";
+
+// Compose projects of the running engine: those whose containers Compose created, and those the user added. Every RPC
+// fails with ENGINE_NOT_RUNNING while the engine is not running.
+service ComposeService {
+  // Returns every project, sorted by name.
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
+  // Streams every project, starting with the current ones and again after every change.
+  rpc WatchProjects(WatchProjectsRequest) returns (stream WatchProjectsResponse);
+  // Remembers a project by its Compose files, so it stays listed while it has no containers. Fails with
+  // INVALID_ARGUMENT when Compose cannot read the files, and with FEATURE_UNAVAILABLE where no Compose is installed.
+  rpc AddProject(AddProjectRequest) returns (AddProjectResponse);
+  // Forgets a project the user added; its containers stay.
+  rpc RemoveProject(RemoveProjectRequest) returns (RemoveProjectResponse);
+  // Runs Compose on a project and streams its output until it exits. Fails with NOT_FOUND for an unknown project,
+  // with FAILED_PRECONDITION when the action needs Compose files the project has none of, and with
+  // FEATURE_UNAVAILABLE where no Compose is installed.
+  rpc RunAction(RunActionRequest) returns (stream RunActionResponse);
+  // Streams the logs of a project's containers, each chunk labelled with its service.
+  rpc StreamLogs(StreamLogsRequest) returns (stream StreamLogsResponse);
+}
+
+message Project {
+  // Compose project name, unique on the engine.
+  string name = 1;
+  // Directory the relative paths in the Compose files start from.
+  string working_dir = 2;
+  // Compose files in the order Compose merges them, as paths on the machine that ran Compose.
+  repeated string config_files = 3;
+  // The user added the project, so it stays listed while it has no containers.
+  bool added = 4;
+  // Services sorted by name: those of the Compose files and those that have containers.
+  repeated Service services = 5;
+  // Why Compose could not read config_files; empty when it read them or the project records none.
+  string config_error = 6;
+}
+
+message Service {
+  string name = 1;
+  // Image of the service's newest container, else the one its Compose file names.
+  string image = 2;
+  // Directory the Compose file builds the service's image from; empty for a service that only pulls one.
+  string build_context = 3;
+  // Containers of the service, sorted by replica number; empty before the service first runs.
+  repeated contr.containers.v1.Container containers = 4;
+}
+
+message ListProjectsRequest {}
+
+message ListProjectsResponse {
+  repeated Project projects = 1;
+}
+
+message WatchProjectsRequest {}
+
+message WatchProjectsResponse {
+  repeated Project projects = 1;
+}
+
+message AddProjectRequest {
+  // Compose files of the project; later files override earlier ones.
+  repeated string config_files = 1;
+}
+
+message AddProjectResponse {
+  Project project = 1;
+}
+
+message RemoveProjectRequest {
+  string name = 1;
+}
+
+message RemoveProjectResponse {}
+
+message RunActionRequest {
+  string project = 1;
+  Action action = 2;
+  // Services to act on; empty acts on every service. ACTION_DOWN always acts on the whole project.
+  repeated string services = 3;
+  // ACTION_DOWN also removes the project's named volumes.
+  bool remove_volumes = 4;
+}
+
+enum Action {
+  ACTION_UNSPECIFIED = 0;
+  // Creates and starts the services in the background, pulling or building images they lack; needs Compose files.
+  ACTION_UP = 1;
+  // Pulls the services' images; needs Compose files.
+  ACTION_PULL = 2;
+  ACTION_START = 3;
+  ACTION_STOP = 4;
+  ACTION_RESTART = 5;
+  // Stops and removes the project's containers and networks.
+  ACTION_DOWN = 6;
+}
+
+message RunActionResponse {
+  oneof event {
+    // A line Compose wrote, without its line ending.
+    string output = 1;
+    // Compose's exit code; the last message, zero on success.
+    int32 exit_code = 2;
+  }
+}
+
+message StreamLogsRequest {
+  string project = 1;
+  // Services whose logs to send; empty sends every service's.
+  repeated string services = 2;
+  // Keeps the stream open for new output of the containers running when the call started.
+  bool follow = 3;
+  // Lines to send from the end of each container's existing log; absent sends the whole log.
+  optional uint32 tail_lines = 4;
+  // Sets StreamLogsResponse.timestamp.
+  bool timestamps = 5;
+}
+
+message StreamLogsResponse {
+  string service = 1;
+  string container_id = 2;
+  contr.containers.v1.LogStream stream = 3;
+  // Output bytes; a chunk may hold part of a line or several lines.
+  bytes data = 4;
+  // Time the engine recorded the output; set only when the request asked for timestamps.
+  google.protobuf.Timestamp timestamp = 5;
+}
