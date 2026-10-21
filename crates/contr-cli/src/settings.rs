@@ -1,8 +1,8 @@
 use anyhow::Context;
 use clap::Subcommand;
 use contr_sdk::api::settings::v1::{
-    CertificateSettings, EngineSettings, GetSettingsRequest, ProxyMode, ProxySettings, RegistrySettings,
-    ResetSettingsRequest, Settings, SettingsState, UpdateSettingsRequest,
+    CertificateSettings, EngineSettings, GetSettingsRequest, KubernetesSettings, ProxyMode, ProxySettings,
+    RegistrySettings, ResetSettingsRequest, Settings, SettingsState, UpdateSettingsRequest,
 };
 use contr_sdk::{Client, Error};
 
@@ -150,6 +150,21 @@ fn with_value(path: &str, value: &str) -> anyhow::Result<Settings> {
                     .collect(),
             });
         }
+        "kubernetes.enabled" | "kubernetes.traefik" => {
+            let mut kubernetes = KubernetesSettings::default();
+            *if path == "kubernetes.enabled" {
+                &mut kubernetes.enabled
+            } else {
+                &mut kubernetes.traefik
+            } = flag()?;
+            settings.kubernetes = Some(kubernetes);
+        }
+        "kubernetes.version" => {
+            settings.kubernetes = Some(KubernetesSettings {
+                version: value.to_owned(),
+                ..Default::default()
+            });
+        }
         _ => anyhow::bail!("{path} is not a setting"),
     }
 
@@ -173,6 +188,7 @@ fn print(state: &SettingsState) {
         .map_or("system", |(name, _)| name);
     let daemon_json = serde_json::from_str::<serde_json::Value>(&engine.daemon_json)
         .map_or(engine.daemon_json.clone(), |daemon| daemon.to_string());
+    let kubernetes = settings.kubernetes.clone().unwrap_or_default();
     let rows: Vec<Vec<String>> = [
         ("engine.start_with_daemon", engine.start_with_daemon.to_string()),
         ("engine.serve_default_pipe", engine.serve_default_pipe.to_string()),
@@ -190,6 +206,9 @@ fn print(state: &SettingsState) {
             "registry.mirrors",
             settings.registry.unwrap_or_default().mirrors.join(","),
         ),
+        ("kubernetes.enabled", kubernetes.enabled.to_string()),
+        ("kubernetes.version", kubernetes.version.clone()),
+        ("kubernetes.traefik", kubernetes.traefik.to_string()),
     ]
     .into_iter()
     .map(|(path, value)| {

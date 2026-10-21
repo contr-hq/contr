@@ -5,6 +5,7 @@ mod compose;
 mod doctor;
 mod exec;
 mod format;
+mod kube;
 mod settings;
 mod wsl;
 
@@ -70,6 +71,9 @@ enum Command {
     /// List Compose projects and run Compose on them.
     #[command(subcommand)]
     Compose(compose::ComposeCommand),
+    /// Show and manage the Kubernetes cluster.
+    #[command(subcommand)]
+    Kube(kube::KubeCommand),
 }
 
 fn main() -> ExitCode {
@@ -102,6 +106,7 @@ async fn run(command: Command) -> anyhow::Result<i32> {
         Command::Cli(command) => cli_tools::run(&Client::connect_or_start(&identity).await?, command).await,
         Command::Wsl(command) => wsl::run(&Client::connect_or_start(&identity).await?, command).await,
         Command::Compose(command) => compose::run(&Client::connect_default(&identity).await?, command).await,
+        Command::Kube(command) => kube::run(&Client::connect_or_start(&identity).await?, command).await,
         Command::Settings { command } => settings::run(&Client::connect_or_start(&identity).await?, command).await,
         Command::Doctor => doctor::doctor(&Client::connect_or_start(&identity).await?).await,
         Command::Fix { action_id } => doctor::fix(&Client::connect_or_start(&identity).await?, action_id).await,
