@@ -414,6 +414,16 @@ dependencies = [
 [[package]]
 name = "contr-compose"
 version = "0.1.0"
+dependencies = [
+ "contr-api",
+ "futures-util",
+ "prost-types",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+]
 
 [[package]]
 name = "contr-core"
@@ -428,6 +438,7 @@ name = "contr-daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-stream",
  "async-trait",
  "bytes",
  "clap",
@@ -435,6 +446,7 @@ dependencies = [
  "contr-backend",
  "contr-backend-host",
  "contr-backend-wsl",
+ "contr-compose",
  "contr-core",
  "contr-engine",
  "contr-platform",
