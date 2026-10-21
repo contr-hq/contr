@@ -4,6 +4,7 @@
 
 mod backend;
 mod discovery;
+mod remediate;
 mod systemd;
 
 pub use backend::HostBackend;

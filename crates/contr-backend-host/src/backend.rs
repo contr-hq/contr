@@ -5,13 +5,14 @@ use std::time::Duration;
 use async_trait::async_trait;
 use contr_backend::{
     Backend, BackendError, BackendKind, Blocker, Capability, Check, CheckStatus, EngineConnector, Probe, Progress,
-    ProgressSink, ResetScope,
+    ProgressSink, RemediationOutcome, ResetScope,
 };
 use contr_core::{ErrorReason, Remediation};
 use tokio::net::UnixStream;
 use tokio::time::{self, Instant};
 
 use crate::discovery::{Candidate, Flavor, candidates};
+use crate::remediate;
 use crate::systemd::Systemd;
 
 const SOCKET_WAIT: Duration = Duration::from_secs(30);
@@ -195,6 +196,27 @@ impl Backend for HostBackend {
 
     async fn reset(&self, _scope: ResetScope, _progress: &dyn ProgressSink) -> Result<(), BackendError> {
         Err(BackendError::Blocked(Blocker::new(ErrorReason::FeatureUnavailable)))
+    }
+
+    fn remediations(&self) -> &'static [Remediation] {
+        &[
+            Remediation::INSTALL_ENGINE,
+            Remediation::JOIN_DOCKER_GROUP,
+            Remediation::SETUP_ROOTLESS,
+        ]
+    }
+
+    async fn remediate(
+        &self,
+        remediation: &Remediation,
+        progress: &dyn ProgressSink,
+    ) -> Result<RemediationOutcome, BackendError> {
+        match *remediation {
+            Remediation::INSTALL_ENGINE => remediate::install_engine(progress).await,
+            Remediation::JOIN_DOCKER_GROUP => remediate::join_docker_group(progress).await,
+            Remediation::SETUP_ROOTLESS => remediate::setup_rootless(progress).await,
+            _ => Err(io::Error::other(format!("cannot run {}", remediation.action_id)).into()),
+        }
     }
 }
 
