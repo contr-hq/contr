@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use contr_backend::{Backend, BackendSettings, EngineSettings, ProxyChoice};
-use contr_settings::{Effective, ProxyMode, Settings, SettingsError, SettingsFile};
+use contr_settings::{ComposeProject, Effective, ProxyMode, Settings, SettingsError, SettingsFile};
 use serde_json::{Map, Value};
 use tokio::sync::{Mutex, watch};
 use tonic::Status;
@@ -14,6 +14,8 @@ use tonic::Status;
 pub(crate) struct Snapshot {
     pub(crate) effective: Effective,
     pub(crate) revision: u64,
+    /// Compose projects the user added.
+    pub(crate) compose_projects: Vec<ComposeProject>,
 }
 
 pub(crate) struct SettingsHub {
@@ -43,7 +45,11 @@ impl SettingsHub {
         Self {
             file: Mutex::new(file),
             policy,
-            current: watch::Sender::new(Snapshot { effective, revision: 1 }),
+            current: watch::Sender::new(Snapshot {
+                effective,
+                revision: 1,
+                compose_projects: stored.compose_projects,
+            }),
             default_endpoint_allowed,
         }
     }
@@ -102,6 +108,7 @@ impl SettingsHub {
         let snapshot = Snapshot {
             effective,
             revision: revision + 1,
+            compose_projects: stored.compose_projects.clone(),
         };
         self.current.send_replace(snapshot.clone());
         backend.apply_settings(self.backend_settings());

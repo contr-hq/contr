@@ -95,7 +95,7 @@ impl Backend for HostBackend {
     }
 
     fn capabilities(&self) -> &'static [Capability] {
-        &[]
+        &[Capability::Compose]
     }
 
     async fn probe(&self) -> Result<Probe, BackendError> {

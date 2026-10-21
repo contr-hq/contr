@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use contr_daemon::{BackendChoice, Config};
+use contr_sdk::api::compose::v1::{Action, ListProjectsRequest, RunActionRequest, WatchProjectsRequest};
 use contr_sdk::api::containers::v1::watch_containers_response::Event;
 use contr_sdk::api::containers::v1::{
     ContainerState, CreateContainerRequest, InspectContainerRequest, KillContainerRequest, PauseContainerRequest,
@@ -63,6 +64,7 @@ impl Daemon {
             docker_context: false,
             settings_file: Some(dir.path().join("settings.json")),
             admin_settings: Some(dir.path().join("admin-settings.json")),
+            compose: None,
         };
         let (shutdown, signal) = oneshot::channel();
         let task = tokio::spawn(contr_daemon::run(config, async {
@@ -802,6 +804,54 @@ fn masked(settings: Settings, paths: &[&str]) -> UpdateSettingsRequest {
         }),
         etag: String::new(),
     }
+}
+
+#[tokio::test]
+async fn compose_projects_group_the_containers_compose_created() {
+    let daemon = Daemon::start();
+    let client = daemon.client().await;
+    start_engine(&client).await;
+
+    let projects = client
+        .compose()
+        .list_projects(ListProjectsRequest {})
+        .await
+        .unwrap()
+        .into_inner()
+        .projects;
+
+    assert_eq!(projects.len(), 1);
+    let shop = &projects[0];
+    assert_eq!(shop.name, "shop");
+    assert!(!shop.added);
+    let services: Vec<(&str, usize)> = shop
+        .services
+        .iter()
+        .map(|service| (service.name.as_str(), service.containers.len()))
+        .collect();
+    assert_eq!(services, [("db", 1), ("web", 1)]);
+
+    let mut watch = client
+        .compose()
+        .watch_projects(WatchProjectsRequest {})
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(watch.message().await.unwrap().unwrap().projects, projects);
+
+    let unknown = client
+        .compose()
+        .run_action(RunActionRequest {
+            project: "nope".to_owned(),
+            action: Action::Up.into(),
+            ..RunActionRequest::default()
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(unknown.code(), tonic::Code::NotFound);
+
+    drop(watch);
+    daemon.stop().await;
 }
 
 #[tokio::test]

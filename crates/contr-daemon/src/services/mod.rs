@@ -1,5 +1,6 @@
 //! Thin gRPC service implementations over the supervisor and the engine slot.
 
+mod compose;
 mod containers;
 mod daemon;
 mod diagnostics;
@@ -18,6 +19,7 @@ use futures_util::stream::{self, BoxStream};
 use futures_util::{Stream, StreamExt};
 use tonic::Status;
 
+pub(crate) use compose::ComposeApi;
 pub(crate) use containers::ContainersApi;
 pub(crate) use daemon::DaemonApi;
 pub(crate) use diagnostics::DiagnosticsApi;

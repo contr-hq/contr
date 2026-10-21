@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using Contr.Sdk.Compose.V1;
 using Contr.Sdk.Containers.V1;
 using Contr.Sdk.Daemon.V1;
 using Contr.Sdk.Diagnostics.V1;
@@ -33,6 +34,7 @@ public sealed class ContrClient : IDisposable
         Images = new ImagesService.ImagesServiceClient(channel);
         Volumes = new VolumesService.VolumesServiceClient(channel);
         Networks = new NetworksService.NetworksServiceClient(channel);
+        Compose = new ComposeService.ComposeServiceClient(channel);
         Integration = new IntegrationService.IntegrationServiceClient(channel);
         Diagnostics = new DiagnosticsService.DiagnosticsServiceClient(channel);
         Settings = new SettingsService.SettingsServiceClient(channel);
@@ -64,6 +66,9 @@ public sealed class ContrClient : IDisposable
 
     /// <summary>Networks service.</summary>
     public NetworksService.NetworksServiceClient Networks { get; }
+
+    /// <summary>Compose projects service.</summary>
+    public ComposeService.ComposeServiceClient Compose { get; }
 
     /// <summary>Integration with the user's tools: Docker CLI tools and WSL distributions.</summary>
     public IntegrationService.IntegrationServiceClient Integration { get; }
