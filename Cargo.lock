@@ -374,6 +374,7 @@ dependencies = [
  "contr-backend",
  "contr-core",
  "tempfile",
+ "thiserror",
  "tokio",
  "tracing",
  "zbus",
@@ -519,8 +520,10 @@ dependencies = [
 name = "contr-helper"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap",
  "contr-core",
+ "nix",
 ]
 
 [[package]]

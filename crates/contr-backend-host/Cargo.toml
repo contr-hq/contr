@@ -12,7 +12,8 @@ publish.workspace = true
 async-trait.workspace = true
 contr-backend.workspace = true
 contr-core.workspace = true
-tokio = { workspace = true, features = ["net", "time"] }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "net", "process", "time"] }
 tracing.workspace = true
 zbus.workspace = true
 
