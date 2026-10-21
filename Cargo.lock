@@ -438,6 +438,7 @@ dependencies = [
  "prost",
  "prost-types",
  "sd-notify",
+ "serde_json",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -512,6 +513,7 @@ dependencies = [
 name = "contr-platform"
 version = "0.1.0"
 dependencies = [
+ "contr-core",
  "nix",
  "serde_json",
  "sha2",
