@@ -742,6 +742,57 @@ async fn daemon_json_is_checked_and_stored() {
     daemon.stop().await;
 }
 
+#[tokio::test]
+async fn passing_the_proxy_to_containers_applies_at_the_next_engine_start() {
+    let daemon = Daemon::start();
+    let client = daemon.client().await;
+    let defaults = client
+        .settings()
+        .get_settings(GetSettingsRequest {})
+        .await
+        .unwrap()
+        .into_inner()
+        .state
+        .unwrap();
+    assert!(!defaults.settings.unwrap().proxy.unwrap().pass_to_containers);
+    start_engine(&client).await;
+
+    let passing = Settings {
+        proxy: Some(ProxySettings {
+            pass_to_containers: true,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let response = client
+        .settings()
+        .update_settings(masked(passing, &["proxy.pass_to_containers"]))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(response.restart_required, ["proxy.pass_to_containers"]);
+    let proxy = response.state.unwrap().settings.unwrap().proxy.unwrap();
+    assert!(proxy.pass_to_containers);
+    assert_eq!(proxy.mode(), ProxyMode::System);
+
+    let dir = daemon.stop_keeping_dir().await;
+    let daemon = Daemon::start_in(dir);
+    let stored = daemon
+        .client()
+        .await
+        .settings()
+        .get_settings(GetSettingsRequest {})
+        .await
+        .unwrap()
+        .into_inner()
+        .state
+        .unwrap();
+    assert!(stored.settings.unwrap().proxy.unwrap().pass_to_containers);
+
+    daemon.stop().await;
+}
+
 /// Update of the `paths` of `settings`, whatever changed since the client last read them.
 fn masked(settings: Settings, paths: &[&str]) -> UpdateSettingsRequest {
     UpdateSettingsRequest {

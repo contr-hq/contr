@@ -14,13 +14,14 @@ use crate::settings::Snapshot;
 use crate::status;
 
 /// Paths whose change applies at the next engine start.
-const ENGINE_RESTART_PATHS: [&str; 8] = [
+const ENGINE_RESTART_PATHS: [&str; 9] = [
     "engine.serve_default_pipe",
     "engine.daemon_json",
     "proxy.mode",
     "proxy.http",
     "proxy.https",
     "proxy.exclude",
+    "proxy.pass_to_containers",
     "certificates.trust_system",
     "registry.mirrors",
 ];
@@ -169,6 +170,7 @@ fn settings(configured: &Configured) -> proto::Settings {
             http: proxy.http.clone(),
             https: proxy.https.clone(),
             exclude: proxy.exclude.clone(),
+            pass_to_containers: proxy.pass_to_containers,
         }),
         certificates: Some(proto::CertificateSettings {
             trust_system: configured.certificates.trust_system,
@@ -196,6 +198,7 @@ fn value(settings: &proto::Settings, path: &str) -> Result<Value, Status> {
         "proxy.http" => json!(proxy.http),
         "proxy.https" => json!(proxy.https),
         "proxy.exclude" => json!(proxy.exclude),
+        "proxy.pass_to_containers" => json!(proxy.pass_to_containers),
         "certificates.trust_system" => json!(settings.certificates.unwrap_or_default().trust_system),
         "registry.mirrors" => json!(settings.registry.clone().unwrap_or_default().mirrors),
         _ => return Err(Status::invalid_argument(format!("{path} is not a setting"))),

@@ -65,6 +65,8 @@ pub struct Proxy {
     pub https: String,
     /// Manual mode: destinations reached directly, as a `NO_PROXY` list.
     pub exclude: String,
+    /// New containers and builds also receive the engine's proxy as `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`.
+    pub pass_to_containers: bool,
 }
 
 impl Proxy {
@@ -113,7 +115,7 @@ pub struct Registry {
 }
 
 /// Every path a user may change and an administrator may fix.
-pub const PATHS: [&str; 9] = [
+pub const PATHS: [&str; 10] = [
     "engine.start_with_daemon",
     "engine.serve_default_pipe",
     "engine.daemon_json",
@@ -121,6 +123,7 @@ pub const PATHS: [&str; 9] = [
     "proxy.http",
     "proxy.https",
     "proxy.exclude",
+    "proxy.pass_to_containers",
     "certificates.trust_system",
     "registry.mirrors",
 ];
@@ -465,6 +468,7 @@ mod tests {
         let configured = effective(&Settings::default(), &Map::new()).unwrap().configured;
 
         assert_eq!(configured.proxy.mode, ProxyMode::System);
+        assert!(!configured.proxy.pass_to_containers);
         assert!(configured.certificates.trust_system);
         assert!(configured.registry.mirrors.is_empty());
     }
@@ -487,6 +491,28 @@ mod tests {
                 exclude: vec![".corp".to_owned(), "10.0.0.0/8".to_owned()],
             }
         );
+    }
+
+    #[test]
+    fn passing_the_proxy_to_containers_is_stored_and_may_be_locked() {
+        let mut settings = Settings::default();
+        assert!(settings.set("proxy.pass_to_containers", json!(true)).unwrap());
+
+        assert_eq!(
+            serde_json::to_value(&settings).unwrap(),
+            json!({"wslIntegrations": [], "proxy": {"passToContainers": true}})
+        );
+        assert!(
+            effective(&settings, &Map::new())
+                .unwrap()
+                .configured
+                .proxy
+                .pass_to_containers
+        );
+
+        let managed = effective(&settings, &policy(&json!({"proxy": {"passToContainers": false}}))).unwrap();
+        assert!(!managed.configured.proxy.pass_to_containers);
+        assert_eq!(managed.locked, BTreeSet::from(["proxy.pass_to_containers"]));
     }
 
     #[test]

@@ -231,6 +231,8 @@ pub struct BackendSettings {
 pub struct EngineSettings {
     /// Proxy for the engine's own connections.
     pub proxy: ProxyChoice,
+    /// New containers and builds also receive that proxy in their environment.
+    pub pass_proxy_to_containers: bool,
     /// The engine also trusts the root certificates the operating system trusts.
     pub trust_system_certificates: bool,
     /// Docker Hub mirrors the engine tries before Docker Hub.
@@ -243,6 +245,7 @@ impl Default for EngineSettings {
     fn default() -> Self {
         Self {
             proxy: ProxyChoice::System,
+            pass_proxy_to_containers: false,
             trust_system_certificates: true,
             registry_mirrors: Vec::new(),
             daemon: Map::new(),
