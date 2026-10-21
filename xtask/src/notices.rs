@@ -13,8 +13,8 @@ use serde_json::Value;
 /// Where `cargo about generate` writes the Rust crate notices before an archive is assembled.
 pub(crate) const RUST_CRATES: &str = "target/notices/rust-crates.txt";
 
-/// Bundled Docker CLI tools by their key in `cli.json`: name, license and source repository.
-const CLI_TOOLS: [(&str, &str, &str, &str); 4] = [
+/// Bundled CLI tools by their key in `cli.json`: name, license and source repository.
+const CLI_TOOLS: [(&str, &str, &str, &str); 5] = [
     ("docker", "Docker CLI", "Apache-2.0", "https://github.com/docker/cli"),
     (
         "compose",
@@ -33,6 +33,12 @@ const CLI_TOOLS: [(&str, &str, &str, &str); 4] = [
         "docker-credential-wincred",
         "MIT",
         "https://github.com/docker/docker-credential-helpers",
+    ),
+    (
+        "kubectl",
+        "kubectl",
+        "Apache-2.0",
+        "https://github.com/kubernetes/kubernetes",
     ),
 ];
 
@@ -79,8 +85,7 @@ pub(crate) fn write(root: &Path, dir: &Path, contents: &Contents<'_>) -> anyhow:
 }
 
 fn cli_section(notices: &mut String, cli_tools: &Value) -> anyhow::Result<()> {
-    notices
-        .push_str("\n## Docker CLI tools (`cli/`)\n\n| Component | Version | License | Source |\n|---|---|---|---|\n");
+    notices.push_str("\n## CLI tools (`cli/`)\n\n| Component | Version | License | Source |\n|---|---|---|---|\n");
     for (key, name, license, repository) in CLI_TOOLS {
         let version = cli_tools[key]
             .as_str()

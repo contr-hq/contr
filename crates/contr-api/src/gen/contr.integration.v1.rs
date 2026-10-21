@@ -30,7 +30,7 @@ pub struct CliTools {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CliTool {
-    /// Such as "docker", "compose", "buildx" or "credential-wincred".
+    /// Such as "docker", "compose", "buildx", "credential-wincred" or "kubectl".
     #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
     /// Version this daemon bundles; empty when it bundles none.

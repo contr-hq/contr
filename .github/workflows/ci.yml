@@ -79,11 +79,11 @@ jobs:
       - run: cargo xtask windows-cli
       - name: Windows CLI bundle is complete
         run: |
-          for file in bin/docker.exe bin/docker-credential-wincred.exe cli-plugins/docker-compose.exe \
+          for file in bin/docker.exe bin/docker-credential-wincred.exe bin/kubectl.exe cli-plugins/docker-compose.exe \
             cli-plugins/docker-buildx.exe cli.json; do
             test -s "target/windows-cli/$file"
           done
-          jq -e '.docker and .compose and .buildx and ."credential-wincred"' target/windows-cli/cli.json
+          jq -e '.docker and .compose and .buildx and ."credential-wincred" and .kubectl' target/windows-cli/cli.json
 
   tools:
     runs-on: ubuntu-latest
