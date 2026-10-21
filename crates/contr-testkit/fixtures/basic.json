@@ -22,7 +22,14 @@
         "com.docker.compose.service": "web"
       },
       "State": "running",
-      "Status": "Up 2 hours"
+      "Status": "Up 2 hours",
+      "NetworkSettings": {
+        "Networks": {
+          "shop_default": {
+            "NetworkID": "e800000000000000000000000000000000000000000000000000000000000000"
+          }
+        }
+      }
     },
     {
       "Id": "c0ffee0200000000000000000000000000000000000000000000000000000000",
@@ -56,7 +63,14 @@
           "RW": true,
           "Propagation": ""
         }
-      ]
+      ],
+      "NetworkSettings": {
+        "Networks": {
+          "shop_default": {
+            "NetworkID": "e800000000000000000000000000000000000000000000000000000000000000"
+          }
+        }
+      }
     },
     {
       "Id": "c0ffee0300000000000000000000000000000000000000000000000000000000",
@@ -70,7 +84,14 @@
       "Ports": [],
       "Labels": {},
       "State": "exited",
-      "Status": "Exited (0) 2 hours ago"
+      "Status": "Exited (0) 2 hours ago",
+      "NetworkSettings": {
+        "Networks": {
+          "shop_default": {
+            "NetworkID": "e800000000000000000000000000000000000000000000000000000000000000"
+          }
+        }
+      }
     }
   ],
   "images": [
