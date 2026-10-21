@@ -37,6 +37,8 @@ fn held(error: &io::Error) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use super::*;
 
     #[test]
@@ -46,6 +48,14 @@ mod tests {
 
         assert!(in_use(port, Transport::Tcp));
         drop(listener);
-        assert!(!in_use(port, Transport::Tcp));
+        // A process another test spawns holds a copy of the listener until it executes its program.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while in_use(port, Transport::Tcp) {
+            assert!(
+                Instant::now() < deadline,
+                "port {port} stayed held after its listener closed"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 }
