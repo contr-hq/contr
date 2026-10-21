@@ -22,6 +22,7 @@ tracing-subscriber.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 contr-engine-proxy.workspace = true
 contr-mux.workspace = true
+serde_json.workspace = true
 nix = { workspace = true, features = ["mount", "net", "signal"] }
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "time"] }
 

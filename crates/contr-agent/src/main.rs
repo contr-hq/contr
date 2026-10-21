@@ -2,6 +2,8 @@
 //! carries the protocol, so every log line goes to standard error.
 
 #[cfg(target_os = "linux")]
+mod configure;
+#[cfg(target_os = "linux")]
 mod data;
 #[cfg(target_os = "linux")]
 mod engine;
@@ -38,6 +40,8 @@ enum Command {
         #[arg(long)]
         share: bool,
     },
+    /// Write the engine configuration on standard input for the engine's next start.
+    Configure,
     /// Mount the data guest's storage for the runtime guest and hold it until standard input closes.
     DataAnchor,
     /// Serve the engine to the WSL distribution this process runs in until standard input closes.
@@ -69,6 +73,7 @@ fn run(command: Command) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     match command {
         Command::Serve { data_root, share } => runtime.block_on(engine::serve(data_root, share)),
+        Command::Configure => configure::configure(),
         Command::DataAnchor => runtime.block_on(data::anchor()),
         Command::Integrate { distribution, owner } => runtime.block_on(integrate::integrate(&distribution, owner)),
         Command::ReleaseDistribution { distribution } => share::release_distributions(Some(&distribution)),
