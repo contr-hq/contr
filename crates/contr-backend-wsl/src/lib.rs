@@ -9,6 +9,7 @@
 
 #[cfg(windows)]
 mod backend;
+mod engine_config;
 mod host_tcp;
 mod images;
 mod integration;

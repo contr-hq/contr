@@ -2,7 +2,7 @@ use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
-use contr_core::guest;
+use contr_core::guest::{self, EngineConfig};
 use contr_engine_proxy::Rewrites;
 use contr_mux::{Channel, Opener, Role};
 use contr_transport::{Endpoint, Listener};
@@ -36,16 +36,18 @@ pub(crate) struct Session {
 }
 
 impl Session {
-    /// Anchors the data distribution, starts the agent in the runtime distribution, serves `engine_pipe` and each of
-    /// `shared_pipes` no other program owns, and returns once the engine answers a ping; the requested
-    /// `integrations` then run until the session stops.
+    /// Configures the engine with `config`, anchors the data distribution, starts the agent in the runtime
+    /// distribution, serves `engine_pipe` and each of `shared_pipes` no other program owns, and returns once the
+    /// engine answers a ping; the requested `integrations` then run until the session stops.
     pub(crate) async fn start(
         runtime: &str,
         data: &str,
+        config: &EngineConfig,
         engine_pipe: &str,
         shared_pipes: &[String],
         integrations: &Integrations,
     ) -> io::Result<Self> {
+        wsl::configure(runtime, config).await?;
         let mut background = Vec::new();
 
         let mut anchor = wsl::spawn(data, &[guest::AGENT_PATH, "data-anchor"])?;

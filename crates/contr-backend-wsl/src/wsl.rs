@@ -4,6 +4,7 @@ use std::path::Path;
 use std::process::{Output, Stdio};
 
 use contr_core::guest;
+use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, Command};
 
 #[cfg(windows)]
@@ -91,6 +92,31 @@ pub(crate) async fn exec(name: &str, args: &[&str]) -> io::Result<()> {
         .await?;
 
     check(&output, &format!("run {} in {name}", args.join(" ")))
+}
+
+/// Hands the engine in distribution `name` the configuration `config` for its next start.
+pub(crate) async fn configure(name: &str, config: &guest::EngineConfig) -> io::Result<()> {
+    let mut agent = wsl()
+        .args([
+            "--distribution",
+            name,
+            "--user",
+            "root",
+            "--exec",
+            guest::AGENT_PATH,
+            "configure",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()?;
+    if let Some(mut stdin) = agent.stdin.take() {
+        stdin.write_all(&serde_json::to_vec(config)?).await?;
+    }
+    let output = agent.wait_with_output().await?;
+
+    check(&output, &format!("configure the engine in {name}"))
 }
 
 /// Registers `image` as WSL 2 distribution `name`, with its virtual disk in `install_dir`.
