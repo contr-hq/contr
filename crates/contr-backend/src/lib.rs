@@ -174,6 +174,12 @@ pub trait Backend: Send + Sync + 'static {
     /// Restores the runtime to a clean state; the engine must be stopped first.
     async fn reset(&self, scope: ResetScope, progress: &dyn ProgressSink) -> Result<(), BackendError>;
 
+    /// Takes the settings the backend applies itself; the daemon calls it before the first start and after every
+    /// change. A change applies at the next engine start.
+    fn apply_settings(&self, settings: BackendSettings) {
+        let _ = settings;
+    }
+
     /// Remediations [`Backend::remediate`] runs; every remediation a blocker or check offers is one of them.
     fn remediations(&self) -> &'static [Remediation] {
         &[]
@@ -196,6 +202,14 @@ pub trait Backend: Send + Sync + 'static {
             remediation.action_id
         ))))
     }
+}
+
+/// User settings a backend applies itself.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BackendSettings {
+    /// Also serve the engine where the Docker CLI looks when no context names another endpoint, while no other
+    /// program does.
+    pub serve_default_endpoint: bool,
 }
 
 /// Result of one diagnostic check.
