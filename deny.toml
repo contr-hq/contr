@@ -1,5 +1,14 @@
 [graph]
 all-features = true
+# Platforms Contr builds for; dependencies of other targets, such as wasm32, never ship.
+targets = [
+  "aarch64-apple-darwin",
+  "aarch64-pc-windows-msvc",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+  "x86_64-unknown-linux-gnu",
+]
 
 [advisories]
 ignore = [
@@ -12,6 +21,7 @@ ignore = [
 allow = [
   "Apache-2.0",
   "BSD-3-Clause",
+  "ISC",
   "MIT",
   "Unicode-3.0",
   "Zlib",
