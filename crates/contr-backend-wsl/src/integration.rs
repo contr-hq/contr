@@ -7,8 +7,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use contr_backend::IntegrationState;
-use contr_core::guest;
-use tokio::io::{AsyncBufReadExt, BufReader, Lines};
+use contr_core::guest::{self, IntegrationConfig};
+use contr_core::proxy::Proxy;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::sync::watch;
 use tokio::task::{JoinHandle, JoinSet};
@@ -72,13 +73,15 @@ impl Integrations {
             .unwrap_or(IntegrationState::Pending)
     }
 
-    /// Serves the requested distributions from the engine in distribution `runtime` until the result stops.
-    pub(crate) fn run(&self, runtime: &str) -> Running {
+    /// Serves the requested distributions from the engine in distribution `runtime` until the result stops; new
+    /// containers and builds of those distributions receive `container_proxy`.
+    pub(crate) fn run(&self, runtime: &str, container_proxy: Option<Proxy>) -> Running {
         let (stop, stopped) = watch::channel(false);
         let task = tokio::spawn(reconcile(
             self.requested.subscribe(),
             Arc::clone(&self.states),
             runtime.to_owned(),
+            IntegrationConfig { container_proxy },
             stopped,
         ));
 
@@ -106,6 +109,7 @@ async fn reconcile(
     mut requested: watch::Receiver<BTreeSet<String>>,
     states: States,
     runtime: String,
+    config: IntegrationConfig,
     mut stopped: watch::Receiver<bool>,
 ) {
     let mut running: HashMap<String, watch::Sender<bool>> = HashMap::new();
@@ -123,7 +127,13 @@ async fn reconcile(
         for name in wanted {
             running.entry(name.clone()).or_insert_with(|| {
                 let (stop, stopped) = watch::channel(false);
-                supervisors.spawn(supervise(name, runtime.clone(), Arc::clone(&states), stopped));
+                supervisors.spawn(supervise(
+                    name,
+                    runtime.clone(),
+                    config.clone(),
+                    Arc::clone(&states),
+                    stopped,
+                ));
                 stop
             });
         }
@@ -144,8 +154,15 @@ async fn reconcile(
     lock(&states).clear();
 }
 
-/// Keeps distribution `name` integrated until `stop` fires, retrying with a growing delay after each failure.
-async fn supervise(name: String, runtime: String, states: States, mut stop: watch::Receiver<bool>) {
+/// Keeps distribution `name` integrated with `config` until `stop` fires, retrying with a growing delay after each
+/// failure.
+async fn supervise(
+    name: String,
+    runtime: String,
+    config: IntegrationConfig,
+    states: States,
+    mut stop: watch::Receiver<bool>,
+) {
     let publish = |state| {
         lock(&states).insert(name.clone(), state);
     };
@@ -154,7 +171,7 @@ async fn supervise(name: String, runtime: String, states: States, mut stop: watc
         publish(IntegrationState::Pending);
         let attempt = Instant::now();
         let started = tokio::select! {
-            started = Integration::start(&name) => started,
+            started = Integration::start(&name, &config) => started,
             _ = stop.changed() => {
                 release(&runtime, &name).await;
                 return;
@@ -227,7 +244,7 @@ struct Integration {
 }
 
 impl Integration {
-    async fn start(name: &str) -> io::Result<Self> {
+    async fn start(name: &str, config: &IntegrationConfig) -> io::Result<Self> {
         let owner = wsl::default_uid(name).await?.to_string();
         let agent = format!("{}/bin/{}", guest::INTEGRATION_DIR, contr_core::product::AGENT_BINARY);
         let mut child = wsl::spawn(name, &[&agent, "integrate", "--distribution", name, "--owner", &owner])?;
@@ -238,7 +255,14 @@ impl Integration {
             .take()
             .ok_or_else(|| io::Error::other("the integration has no standard output"))?;
         let mut stdout = BufReader::new(stdout).lines();
-        let stdin = child.stdin.take();
+        let mut stdin = child.stdin.take();
+        // The configuration may hold proxy credentials, which a command line would show to every user of the
+        // distribution.
+        if let Some(stdin) = stdin.as_mut() {
+            let mut line = serde_json::to_vec(config)?;
+            line.push(b'\n');
+            stdin.write_all(&line).await?;
+        }
 
         let ready = matches!(
             timeout(READY_WAIT, wait_for_line(&mut stdout, guest::INTEGRATION_READY)).await,

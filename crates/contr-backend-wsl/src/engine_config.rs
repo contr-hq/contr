@@ -8,10 +8,18 @@ use serde_json::{Map, Value, json};
 /// Destinations the engine reaches directly whatever the proxy settings say: its own loopback interface and the host.
 const ALWAYS_DIRECT: [&str; 4] = ["localhost", "127.0.0.0/8", "::1", "host.docker.internal"];
 
+/// What the engine and the clients of its pipes and integrations use from the engine's next start.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Configuration {
+    pub(crate) engine: EngineConfig,
+    /// Proxy that new containers and builds receive, as the guest reaches it.
+    pub(crate) container_proxy: Option<Proxy>,
+}
+
 /// Looks up what `settings` leave to the system and composes the engine's configuration. A lookup that fails is
 /// logged, and the engine starts without what it would have added.
 #[cfg(windows)]
-pub(crate) async fn resolve(settings: &contr_backend::EngineSettings) -> EngineConfig {
+pub(crate) async fn resolve(settings: &contr_backend::EngineSettings) -> Configuration {
     use std::time::Duration;
 
     use contr_backend::ProxyChoice;
@@ -59,10 +67,14 @@ pub(crate) async fn resolve(settings: &contr_backend::EngineSettings) -> EngineC
         http = proxy.http.as_deref().unwrap_or("direct"),
         https = proxy.https.as_deref().unwrap_or("direct"),
         mirrors = settings.registry_mirrors.len(),
+        containers = settings.pass_proxy_to_containers,
         "configuring the engine"
     );
 
-    compose(&settings.daemon, &proxy, &settings.registry_mirrors, certificates)
+    Configuration {
+        container_proxy: container_proxy(&proxy, settings.pass_proxy_to_containers),
+        engine: compose(&settings.daemon, &proxy, &settings.registry_mirrors, certificates),
+    }
 }
 
 /// The engine's configuration: the user's `daemon` with `proxy` and `mirrors` added, and the PEM `certificates`.
@@ -74,22 +86,15 @@ pub(crate) fn compose(
 ) -> EngineConfig {
     let mut daemon = daemon.clone();
     if !proxy.is_direct() {
+        let proxy = in_guest(proxy);
         let mut proxies = Map::new();
-        if let Some(http) = &proxy.http {
-            proxies.insert("http-proxy".to_owned(), json!(reachable(http)));
+        if let Some(http) = proxy.http {
+            proxies.insert("http-proxy".to_owned(), json!(http));
         }
-        if let Some(https) = &proxy.https {
-            proxies.insert("https-proxy".to_owned(), json!(reachable(https)));
+        if let Some(https) = proxy.https {
+            proxies.insert("https-proxy".to_owned(), json!(https));
         }
-        let host = guest::HOST_ADDRESS.to_string();
-        let direct: Vec<&str> = proxy
-            .exclude
-            .iter()
-            .map(String::as_str)
-            .chain(ALWAYS_DIRECT)
-            .chain([host.as_str()])
-            .collect();
-        proxies.insert("no-proxy".to_owned(), json!(direct.join(",")));
+        proxies.insert("no-proxy".to_owned(), json!(proxy.exclude.join(",")));
         daemon.insert("proxies".to_owned(), Value::Object(proxies));
     }
     if !mirrors.is_empty() {
@@ -97,6 +102,27 @@ pub(crate) fn compose(
     }
 
     EngineConfig { daemon, certificates }
+}
+
+/// The proxy new containers and builds receive: the engine's, when `pass` is set and it names a server.
+pub(crate) fn container_proxy(proxy: &Proxy, pass: bool) -> Option<Proxy> {
+    (pass && !proxy.is_direct()).then(|| in_guest(proxy))
+}
+
+/// `proxy` as the guest reaches it, which also reaches its own loopback interface and the host directly.
+fn in_guest(proxy: &Proxy) -> Proxy {
+    Proxy {
+        http: proxy.http.as_deref().map(reachable),
+        https: proxy.https.as_deref().map(reachable),
+        exclude: proxy
+            .exclude
+            .iter()
+            .map(String::as_str)
+            .chain(ALWAYS_DIRECT)
+            .map(str::to_owned)
+            .chain([guest::HOST_ADDRESS.to_string()])
+            .collect(),
+    }
 }
 
 /// `url` as the guest reaches it: a server on the host's loopback interface, such as a local authenticating proxy,
@@ -170,6 +196,35 @@ mod tests {
             }})
         );
         assert_eq!(config.certificates, "PEM");
+    }
+
+    #[test]
+    fn containers_receive_the_proxy_the_guest_reaches_only_when_asked() {
+        let proxy = Proxy {
+            http: Some("http://localhost:3128".to_owned()),
+            https: None,
+            exclude: vec![".corp".to_owned()],
+        };
+
+        assert_eq!(container_proxy(&proxy, false), None);
+        assert_eq!(container_proxy(&Proxy::default(), true), None);
+        assert_eq!(
+            container_proxy(&proxy, true),
+            Some(Proxy {
+                http: Some("http://198.19.255.254:3128".to_owned()),
+                https: None,
+                exclude: [
+                    ".corp",
+                    "localhost",
+                    "127.0.0.0/8",
+                    "::1",
+                    "host.docker.internal",
+                    "198.19.255.254"
+                ]
+                .map(str::to_owned)
+                .to_vec(),
+            })
+        );
     }
 
     #[test]

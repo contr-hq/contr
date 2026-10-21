@@ -6,6 +6,8 @@ use std::net::Ipv4Addr;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::proxy::Proxy;
+
 /// Absolute path of the agent inside every guest image.
 pub const AGENT_PATH: &str = "/usr/local/bin/contr-agent";
 
@@ -80,4 +82,11 @@ pub struct EngineConfig {
     pub daemon: Map<String, Value>,
     /// PEM certificates the engine trusts besides the guest's own.
     pub certificates: String,
+}
+
+/// What `contr-agent integrate` reads as one line of JSON on standard input before it serves the engine.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct IntegrationConfig {
+    /// Proxy that containers and builds created from the distribution receive, as the guest reaches it.
+    pub container_proxy: Option<Proxy>,
 }

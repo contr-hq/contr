@@ -8,11 +8,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, bail, ensure};
-use contr_core::guest;
+use contr_core::guest::{self, IntegrationConfig};
 use contr_engine_proxy::Rewrites;
 use nix::mount::{MntFlags, MsFlags, mount, umount2};
 use nix::unistd::Group;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Stdin};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::signal::unix::{SignalKind, signal};
 
@@ -57,12 +57,15 @@ const CLI_LINKS: [CliLink; 3] = [
 ];
 
 /// Serves the engine to `distribution`, the distribution this process runs in, through a socket owned by `owner`
-/// until standard input closes or SIGTERM arrives, then removes everything it added.
+/// until standard input closes or SIGTERM arrives, then removes everything it added. The first line of standard
+/// input holds the [`IntegrationConfig`].
 pub(crate) async fn integrate(distribution: &str, owner: u32) -> anyhow::Result<()> {
     ensure!(
         is_plain_name(distribution),
         "{distribution:?} is not a distribution name"
     );
+    let mut stdin = BufReader::new(tokio::io::stdin());
+    let config = read_config(&mut stdin).await?;
     let root = RootShare::mount(distribution)?;
     let _links = CliLinks::place();
     let socket = EngineSocket::bind(owner)?;
@@ -70,7 +73,7 @@ pub(crate) async fn integrate(distribution: &str, owner: u32) -> anyhow::Result<
         drives_root: guest::WINDOWS_DRIVES.to_owned(),
         distro_root: Some(root.path.to_string_lossy().into_owned()),
         host_alias: true,
-        proxy: None,
+        proxy: config.container_proxy,
     });
 
     let mut stdout = tokio::io::stdout();
@@ -81,7 +84,7 @@ pub(crate) async fn integrate(distribution: &str, owner: u32) -> anyhow::Result<
     tracing::info!(%distribution, "serving the engine");
 
     let mut terminate = signal(SignalKind::terminate())?;
-    let host_closed = async { tokio::io::copy(&mut tokio::io::stdin(), &mut tokio::io::sink()).await };
+    let host_closed = async { tokio::io::copy(&mut stdin, &mut tokio::io::sink()).await };
     tokio::pin!(host_closed);
     loop {
         tokio::select! {
@@ -98,6 +101,16 @@ pub(crate) async fn integrate(distribution: &str, owner: u32) -> anyhow::Result<
     tracing::info!(%distribution, "no longer serving the engine");
 
     Ok(())
+}
+
+async fn read_config(stdin: &mut BufReader<Stdin>) -> anyhow::Result<IntegrationConfig> {
+    let mut line = String::new();
+    stdin
+        .read_line(&mut line)
+        .await
+        .context("cannot read the integration's configuration")?;
+
+    serde_json::from_str(&line).context("the integration's configuration is invalid")
 }
 
 async fn relay(client: UnixStream, rewrites: Arc<Rewrites>) {
