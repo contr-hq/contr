@@ -10,8 +10,6 @@ use contr_core::product;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-/// Where packages install the helper.
-const INSTALLED_HELPER: &str = "/usr/libexec/contr/contr-helper";
 /// Docker's tool that sets up a rootless engine for the user who runs it.
 const ROOTLESS_SETUP_TOOL: &str = "dockerd-rootless-setuptool.sh";
 /// pkexec's exit codes when the user dismissed its prompt or is not allowed.
@@ -77,8 +75,13 @@ fn helper() -> io::Result<PathBuf> {
         .filter(|path| path.is_file());
 
     beside
-        .or_else(|| Some(PathBuf::from(INSTALLED_HELPER)).filter(|path| path.is_file()))
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("{INSTALLED_HELPER} is not installed")))
+        .or_else(|| Some(PathBuf::from(product::INSTALLED_HELPER)).filter(|path| path.is_file()))
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("{} is not installed", product::INSTALLED_HELPER),
+            )
+        })
 }
 
 fn on_path(program: &str) -> Option<PathBuf> {
@@ -189,7 +192,7 @@ mod tests {
         let policy = include_str!("../../../packaging/linux/polkit/io.github.contr_hq.contr.policy");
 
         assert!(policy.contains(&format!("<action id=\"{}\">", product::POLKIT_MANAGE_ENGINE)));
-        assert!(policy.contains(&format!(">{INSTALLED_HELPER}</annotate>")));
+        assert!(policy.contains(&format!(">{}</annotate>", product::INSTALLED_HELPER)));
     }
 
     #[tokio::test]
