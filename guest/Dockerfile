@@ -4,11 +4,14 @@ ARG ALPINE=alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c5
 ARG RUST=rust:1.98.1-alpine3.24@sha256:7cc1c22d77d9432f7fe012a70e6d3e555af54c2a6832700ed7d553f1769ae89f
 
 FROM ${RUST} AS agent
+# Names the build cache of one source tree; trees built side by side on one machine would otherwise reuse each
+# other's compiled crates.
+ARG CONTR_CACHE=default
 RUN apk add --no-cache musl-dev
 WORKDIR /src
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
+    --mount=type=cache,id=contr-agent-target-${CONTR_CACHE},target=/src/target \
     cargo build --release --locked --package contr-agent \
     && install -D -m 0755 target/release/contr-agent /out/contr-agent
 
