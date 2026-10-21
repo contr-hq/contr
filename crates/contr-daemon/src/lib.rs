@@ -2,6 +2,7 @@
 //! the per-user local endpoint.
 
 mod services;
+mod settings;
 mod slot;
 mod status;
 
@@ -18,6 +19,7 @@ use contr_api::engine::v1::engine_service_server::EngineServiceServer;
 use contr_api::images::v1::images_service_server::ImagesServiceServer;
 use contr_api::integration::v1::integration_service_server::IntegrationServiceServer;
 use contr_api::networks::v1::networks_service_server::NetworksServiceServer;
+use contr_api::settings::v1::settings_service_server::SettingsServiceServer;
 use contr_api::volumes::v1::volumes_service_server::VolumesServiceServer;
 use contr_backend::{Backend, BackendKind, EngineConnector, EngineHealth, EngineSupervisor, SupervisorConfig};
 use contr_core::{paths, product};
@@ -25,9 +27,10 @@ use contr_transport::{DiscoveryFile, Endpoint, Listener, TransportError};
 use tonic::transport::Server;
 
 use crate::services::{
-    CliLocations, ContainersApi, DaemonApi, DiagnosticsApi, EngineApi, ImagesApi, IntegrationApi, NetworksApi, Shared,
-    VolumesApi, WslAccess,
+    CliLocations, ContainersApi, DaemonApi, DiagnosticsApi, EngineApi, ImagesApi, IntegrationApi, NetworksApi,
+    SettingsApi, Shared, VolumesApi, WslAccess,
 };
+use crate::settings::SettingsHub;
 use crate::slot::{DockerContext, EngineSlot};
 
 /// Backend the daemon runs.
@@ -61,6 +64,10 @@ pub struct Config {
     pub cli_dir: Option<PathBuf>,
     /// Keeps the Docker CLI context pointed at the running engine.
     pub docker_context: bool,
+    /// The user's settings file instead of the per-user default.
+    pub settings_file: Option<PathBuf>,
+    /// File holding the administrator's settings instead of the system's policy location.
+    pub admin_settings: Option<PathBuf>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -88,13 +95,20 @@ pub enum DaemonError {
 /// Serves the API until `shutdown` completes.
 pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> Result<(), DaemonError> {
     let listener = bind(config.listen.as_ref())?;
-    let (backend, wsl) = backend(&config)?;
+    let settings_file = config.settings_file.clone().or_else(paths::settings_file);
+    let policy = settings::load_policy(config.admin_settings.as_ref());
+    let settings = Arc::new(SettingsHub::open(settings_file.clone(), policy, config.default_pipe));
+    let (backend, wsl) = backend(&config, settings_file.as_deref())?;
+    backend.apply_settings(settings.backend_settings());
     // Only the WSL backend owns its engine; a host engine its administrator stopped must stay stopped.
     let supervision = SupervisorConfig {
         recover: backend.kind() == BackendKind::Wsl,
         ..SupervisorConfig::default()
     };
     let supervisor = EngineSupervisor::spawn(Arc::clone(&backend), Arc::new(Health), supervision).await;
+    if settings.snapshot().effective.configured.engine.start_with_daemon {
+        start_engine(supervisor.clone());
+    }
     let context = docker_context(&config, backend.kind());
     let slot = EngineSlot::spawn(&supervisor, context.clone());
     let shared = Arc::new(Shared {
@@ -106,6 +120,7 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
         cli: cli_locations(config.cli_dir.clone()),
         wsl,
         backend: Arc::clone(&backend),
+        settings,
         docker_context: context,
     });
 
@@ -131,6 +146,7 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
         .add_service(ImagesServiceServer::new(ImagesApi(Arc::clone(&shared))))
         .add_service(IntegrationServiceServer::new(IntegrationApi(Arc::clone(&shared))))
         .add_service(DiagnosticsServiceServer::new(DiagnosticsApi(Arc::clone(&shared))))
+        .add_service(SettingsServiceServer::new(SettingsApi(Arc::clone(&shared))))
         .add_service(VolumesServiceServer::new(VolumesApi(Arc::clone(&shared))))
         .add_service(NetworksServiceServer::new(NetworksApi(shared)))
         .serve_with_incoming_shutdown(listener.incoming(), shutdown)
@@ -140,6 +156,18 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
         DiscoveryFile::remove(&path, std::process::id());
     }
     Ok(served?)
+}
+
+/// Starts the engine in the background, as the settings ask when the daemon starts.
+fn start_engine(supervisor: EngineSupervisor) {
+    tokio::spawn(async move {
+        let mut events = supervisor.start().await;
+        while let Some(event) = futures_util::StreamExt::next(&mut events).await {
+            if let contr_backend::OperationEvent::Finished(Err(error)) = event {
+                tracing::warn!(%error, "the engine did not start with the daemon");
+            }
+        }
+    });
 }
 
 fn bind(listen: Option<&Endpoint>) -> Result<Listener, DaemonError> {
@@ -154,11 +182,19 @@ fn bind(listen: Option<&Endpoint>) -> Result<Listener, DaemonError> {
 }
 
 /// The configured backend and, for WSL, access to the user's distributions.
-fn backend(config: &Config) -> Result<(Arc<dyn Backend>, Option<WslAccess>), DaemonError> {
+/// The configured backend and, for WSL, access to the user's distributions.
+#[cfg_attr(
+    not(windows),
+    allow(unused_variables, reason = "only the WSL backend reads the stored settings")
+)]
+fn backend(
+    config: &Config,
+    settings_file: Option<&std::path::Path>,
+) -> Result<(Arc<dyn Backend>, Option<WslAccess>), DaemonError> {
     match config.backend {
         BackendChoice::Host => Ok((host_backend(config.engine_socket.clone())?, None)),
         #[cfg(windows)]
-        BackendChoice::Wsl => wsl_backend(config.guest_dir.clone(), config.default_pipe),
+        BackendChoice::Wsl => wsl_backend(config.guest_dir.clone(), settings_file),
         #[cfg(feature = "fake")]
         BackendChoice::Fake => {
             let fixtures = match &config.fixtures {
@@ -191,7 +227,7 @@ fn host_backend(_engine_socket: Option<PathBuf>) -> Result<Arc<dyn Backend>, Dae
 #[cfg(windows)]
 fn wsl_backend(
     guest_dir: Option<PathBuf>,
-    default_pipe: bool,
+    settings_file: Option<&std::path::Path>,
 ) -> Result<(Arc<dyn Backend>, Option<WslAccess>), DaemonError> {
     let setup = |source| DaemonError::Backend { backend: "wsl", source };
     let guest_dir = match guest_dir {
@@ -203,21 +239,19 @@ fn wsl_backend(
             .ok_or_else(|| setup(std::io::Error::other("contrd has no parent directory")))?,
     };
 
-    let settings = paths::settings_file()
-        .map(contr_settings::SettingsFile::new)
-        .ok_or_else(|| setup(std::io::Error::other("LOCALAPPDATA is not set")))?;
-    let integrated = match settings.load() {
-        Ok(settings) => settings.wsl_integrations,
-        Err(error) => {
+    let stored = settings_file.map(|path| contr_settings::SettingsFile::new(path.to_path_buf()).load());
+    let integrated = match stored {
+        Some(Ok(stored)) => stored.wsl_integrations,
+        Some(Err(error)) => {
             tracing::warn!(?error, "cannot read the settings; no WSL distribution is integrated");
             std::collections::BTreeSet::new()
         }
+        None => std::collections::BTreeSet::new(),
     };
 
-    let backend = Arc::new(contr_backend_wsl::WslBackend::new(guest_dir, default_pipe, integrated).map_err(setup)?);
+    let backend = Arc::new(contr_backend_wsl::WslBackend::new(guest_dir, integrated).map_err(setup)?);
     let wsl = WslAccess {
         integration: Arc::clone(&backend) as Arc<dyn contr_backend::WslIntegration>,
-        settings: tokio::sync::Mutex::new(settings),
     };
     Ok((backend, Some(wsl)))
 }

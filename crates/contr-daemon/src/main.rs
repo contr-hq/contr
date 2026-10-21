@@ -38,6 +38,12 @@ struct Args {
     /// Directory holding the Docker CLI tools to install for the user; defaults to `cli` next to this executable.
     #[arg(long)]
     cli_dir: Option<PathBuf>,
+    /// The user's settings file; defaults to settings.json in the per-user configuration directory.
+    #[arg(long)]
+    settings: Option<PathBuf>,
+    /// File holding the administrator's settings instead of the system's policy location.
+    #[arg(long)]
+    admin_settings: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -82,6 +88,8 @@ fn main() -> anyhow::Result<()> {
         fixtures: args.fixtures,
         guest_dir: args.guest_dir,
         default_pipe: !args.no_default_pipe,
+        settings_file: args.settings,
+        admin_settings: args.admin_settings,
         cli_dir: args.cli_dir,
         docker_context: !args.no_docker_context,
     };

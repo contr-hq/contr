@@ -28,6 +28,15 @@ pub(crate) fn feature_unavailable(message: &str) -> Status {
     with_reason(Code::FailedPrecondition, message, ErrorReason::FeatureUnavailable, &[])
 }
 
+pub(crate) fn setting_locked(path: &str) -> Status {
+    with_reason(
+        Code::FailedPrecondition,
+        &format!("an administrator fixes {path}"),
+        ErrorReason::SettingLocked,
+        &[],
+    )
+}
+
 pub(crate) fn from_engine(error: EngineError) -> Status {
     match error {
         EngineError::NotFound(message) => Status::not_found(message),

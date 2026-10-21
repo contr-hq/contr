@@ -7,6 +7,7 @@ using Contr.Sdk.Engine.V1;
 using Contr.Sdk.Images.V1;
 using Contr.Sdk.Integration.V1;
 using Contr.Sdk.Networks.V1;
+using Contr.Sdk.Settings.V1;
 using Contr.Sdk.Volumes.V1;
 using Grpc.Core;
 using Grpc.Net.Client;
@@ -34,6 +35,7 @@ public sealed class ContrClient : IDisposable
         Networks = new NetworksService.NetworksServiceClient(channel);
         Integration = new IntegrationService.IntegrationServiceClient(channel);
         Diagnostics = new DiagnosticsService.DiagnosticsServiceClient(channel);
+        Settings = new SettingsService.SettingsServiceClient(channel);
     }
 
     /// <summary>Value of <c>proto/API_REVISION</c> this SDK was generated from.</summary>
@@ -68,6 +70,9 @@ public sealed class ContrClient : IDisposable
 
     /// <summary>Checks of what keeps the engine from working, and the fixes the daemon runs.</summary>
     public DiagnosticsService.DiagnosticsServiceClient Diagnostics { get; }
+
+    /// <summary>The user's settings and the ones an administrator fixes.</summary>
+    public SettingsService.SettingsServiceClient Settings { get; }
 
     /// <summary>Connects to <paramref name="endpoint"/>, or to <see cref="ContrEndpoint.Resolve"/>, and performs the handshake.</summary>
     public static async Task<ContrClient> ConnectAsync(
