@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package contr.updates.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Contr.Sdk.Updates.V1";
+
+// Whether a newer Contr is published. The daemon reads the core's releases on GitHub through the configured proxy once
+// a day while settings updates.check is on; clients install updates their own way.
+service UpdatesService {
+  // Checks now and returns the result; fails with FAILED_PRECONDITION while updates.check is off.
+  rpc CheckForUpdates(CheckForUpdatesRequest) returns (CheckForUpdatesResponse);
+  // Returns the result of the latest check without checking.
+  rpc GetUpdateStatus(GetUpdateStatusRequest) returns (GetUpdateStatusResponse);
+}
+
+message CheckForUpdatesRequest {}
+
+message CheckForUpdatesResponse {
+  UpdateStatus status = 1;
+}
+
+message GetUpdateStatusRequest {}
+
+message GetUpdateStatusResponse {
+  UpdateStatus status = 1;
+}
+
+message UpdateStatus {
+  // Version of the running daemon, such as "0.1.0-alpha.2".
+  string current_version = 1;
+  // Newest release after current_version; unset when none is newer or no check has succeeded.
+  Release available = 2;
+  // When the latest check ended; unset before the first.
+  google.protobuf.Timestamp checked_at = 3;
+  // Why the latest check failed; empty when it succeeded.
+  string error = 4;
+}
+
+// A published release.
+message Release {
+  // Such as "0.2.0" or "0.2.1-beta.1".
+  string version = 1;
+  // Release page.
+  string url = 2;
+  google.protobuf.Timestamp published_at = 3;
+  // Release notes in Markdown.
+  string notes = 4;
+}

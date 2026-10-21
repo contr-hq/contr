@@ -11,6 +11,8 @@ pub struct Settings {
     pub registry: ::core::option::Option<RegistrySettings>,
     #[prost(message, optional, tag = "5")]
     pub kubernetes: ::core::option::Option<KubernetesSettings>,
+    #[prost(message, optional, tag = "6")]
+    pub updates: ::core::option::Option<UpdatesSettings>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct EngineSettings {
@@ -80,6 +82,16 @@ pub struct KubernetesSettings {
     /// Runs the Traefik ingress controller.
     #[prost(bool, tag = "3")]
     pub traefik: bool,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UpdatesSettings {
+    /// Checks the published releases once a day and when UpdatesService.CheckForUpdates asks. While it is off, that call
+    /// fails with FAILED_PRECONDITION and clients offer no updates.
+    #[prost(bool, tag = "1")]
+    pub check: bool,
+    /// Prereleases count as updates; a daemon that is itself a prerelease counts them either way.
+    #[prost(bool, tag = "2")]
+    pub prereleases: bool,
 }
 /// Detail of the INVALID_ARGUMENT status UpdateSettings returns when the engine rejects engine.daemon_json.
 #[derive(Clone, PartialEq, ::prost::Message)]

@@ -56,6 +56,9 @@ struct Args {
     /// Kubeconfig file that receives the cluster's context instead of the one kubectl writes to.
     #[arg(long)]
     kubeconfig: Option<PathBuf>,
+    /// GitHub releases endpoint to check for updates instead of Contr's own, such as an internal mirror.
+    #[arg(long, value_name = "URL")]
+    update_feed: Option<String>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -112,6 +115,7 @@ fn main() -> anyhow::Result<()> {
         compose: args.compose,
         kubeconfig: args.kubeconfig,
         log: Some(log),
+        update_feed: args.update_feed,
     };
 
     tokio::runtime::Builder::new_multi_thread()

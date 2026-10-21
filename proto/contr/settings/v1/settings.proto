@@ -26,6 +26,7 @@ message Settings {
   CertificateSettings certificates = 3;
   RegistrySettings registry = 4;
   KubernetesSettings kubernetes = 5;
+  UpdatesSettings updates = 6;
 }
 
 message EngineSettings {
@@ -93,6 +94,14 @@ message KubernetesSettings {
   string version = 2;
   // Runs the Traefik ingress controller.
   bool traefik = 3;
+}
+
+message UpdatesSettings {
+  // Checks the published releases once a day and when UpdatesService.CheckForUpdates asks. While it is off, that call
+  // fails with FAILED_PRECONDITION and clients offer no updates.
+  bool check = 1;
+  // Prereleases count as updates; a daemon that is itself a prerelease counts them either way.
+  bool prereleases = 2;
 }
 
 // Detail of the INVALID_ARGUMENT status UpdateSettings returns when the engine rejects engine.daemon_json.

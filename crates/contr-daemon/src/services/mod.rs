@@ -10,6 +10,7 @@ mod integration;
 mod kubernetes;
 mod networks;
 mod settings;
+mod updates;
 mod volumes;
 
 use std::sync::Arc;
@@ -31,12 +32,14 @@ pub(crate) use integration::{CliLocations, IntegrationApi, WslAccess};
 pub(crate) use kubernetes::KubernetesApi;
 pub(crate) use networks::NetworksApi;
 pub(crate) use settings::SettingsApi;
+pub(crate) use updates::UpdatesApi;
 pub(crate) use volumes::VolumesApi;
 
 use crate::kubernetes::KubernetesHub;
 use crate::settings::SettingsHub;
 use crate::slot::{DockerContext, EngineSlot};
 use crate::status;
+use crate::updates::UpdatesHub;
 
 pub(crate) type ResponseStream<T> = BoxStream<'static, Result<T, Status>>;
 
@@ -56,6 +59,7 @@ pub(crate) struct Shared {
     /// Docker CLI context the daemon keeps pointed at the engine; `None` when it manages none.
     pub(crate) docker_context: Option<DockerContext>,
     pub(crate) kubernetes: Arc<KubernetesHub>,
+    pub(crate) updates: Arc<UpdatesHub>,
     pub(crate) log: Option<LogRing>,
 }
 
