@@ -1,5 +1,5 @@
 # The licenses deny.toml allows; cargo-about refuses any other.
-accepted = ["Apache-2.0", "BSD-3-Clause", "MIT", "Unicode-3.0", "Zlib"]
+accepted = ["Apache-2.0", "BSD-3-Clause", "ISC", "MIT", "Unicode-3.0", "Zlib"]
 targets = ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl"]
 ignore-dev-dependencies = true
 ignore-build-dependencies = true
