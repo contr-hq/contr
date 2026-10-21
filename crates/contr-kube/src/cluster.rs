@@ -179,6 +179,13 @@ pub async fn system_pods(engine: &Engine) -> Result<Vec<Pod>, ClusterError> {
 
 /// Copies `image` from the engine into the cluster's image store.
 pub async fn import(engine: &Engine, image: &str) -> Result<(), ClusterError> {
+    match engine.inspect_image(image).await {
+        Ok(_) => {}
+        Err(EngineError::NotFound(_)) => {
+            return Err(ClusterError::Failed(format!("the engine has no image {image}")));
+        }
+        Err(error) => return Err(error.into()),
+    }
     let archive = engine.export_images(&[image.to_owned()]);
     let output = engine
         .run_in(
