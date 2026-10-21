@@ -1,0 +1,13 @@
+Rust crates in Contr's binaries and the licenses they are used under.
+{{#each licenses}}
+
+================================================================================
+{{{name}}}
+
+Used by:
+{{#each used_by}}
+  {{crate.name}} {{crate.version}}
+{{/each}}
+
+{{{text}}}
+{{/each}}

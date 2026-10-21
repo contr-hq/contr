@@ -3,6 +3,7 @@
 mod dist;
 mod docker;
 mod guest;
+mod notices;
 mod windows_cli;
 
 use std::path::{Path, PathBuf};
@@ -38,6 +39,15 @@ enum Task {
         #[arg(long, default_value = "target/dist")]
         out: PathBuf,
     },
+    /// Assemble the Linux archive from Linux builds of contrd and contr.
+    DistLinux {
+        /// Directory holding contrd and contr built for Linux.
+        #[arg(long)]
+        binaries: PathBuf,
+        /// Directory that receives the archive.
+        #[arg(long, default_value = "target/dist")]
+        out: PathBuf,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -51,6 +61,7 @@ fn main() -> anyhow::Result<()> {
         Task::Guest { arch } => guest::build(&root, &arch)?,
         Task::WindowsCli => windows_cli::build(&root)?,
         Task::DistWindows { binaries, out } => dist::windows(&root, &binaries, &out)?,
+        Task::DistLinux { binaries, out } => dist::linux(&root, &binaries, &out)?,
     }
 
     Ok(())
