@@ -221,6 +221,22 @@ fn package_table(packages: &[Package]) -> String {
 mod tests {
     use super::*;
 
+    /// The quoted names between `start` and the next `]` in `text`.
+    fn quoted_list(text: &str, start: &str) -> Vec<String> {
+        let list = text.split_once(start).unwrap().1.split_once(']').unwrap().0;
+        let mut names: Vec<String> = list.split('"').skip(1).step_by(2).map(str::to_owned).collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn notices_accept_the_licences_cargo_deny_allows() {
+        let deny = include_str!("../../deny.toml");
+        let about = include_str!("../../packaging/licenses/about.toml");
+
+        assert_eq!(quoted_list(about, "accepted = ["), quoted_list(deny, "\nallow = ["));
+    }
+
     #[test]
     fn reads_package_records() {
         let database = "C:Q1abc=\nP:busybox\nV:1.37.0-r31\nA:x86_64\nL:GPL-2.0-only\n\nP:musl\nV:1.2.6-r2\nL:MIT\n\n";
