@@ -1,6 +1,7 @@
 //! `contr`, the command-line interface to the Contr daemon.
 
 mod cli_tools;
+mod compose;
 mod doctor;
 mod exec;
 mod format;
@@ -66,6 +67,9 @@ enum Command {
     /// Show or change which of your WSL distributions reach the engine.
     #[command(subcommand)]
     Wsl(wsl::WslCommand),
+    /// List Compose projects and run Compose on them.
+    #[command(subcommand)]
+    Compose(compose::ComposeCommand),
 }
 
 fn main() -> ExitCode {
@@ -97,6 +101,7 @@ async fn run(command: Command) -> anyhow::Result<i32> {
         Command::Exec(args) => exec::run(&Client::connect_default(&identity).await?, args).await,
         Command::Cli(command) => cli_tools::run(&Client::connect_or_start(&identity).await?, command).await,
         Command::Wsl(command) => wsl::run(&Client::connect_or_start(&identity).await?, command).await,
+        Command::Compose(command) => compose::run(&Client::connect_default(&identity).await?, command).await,
         Command::Settings { command } => settings::run(&Client::connect_or_start(&identity).await?, command).await,
         Command::Doctor => doctor::doctor(&Client::connect_or_start(&identity).await?).await,
         Command::Fix { action_id } => doctor::fix(&Client::connect_or_start(&identity).await?, action_id).await,
