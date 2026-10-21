@@ -204,7 +204,7 @@ async fn pull(engine: &Engine, image: &str) -> Result<String, ClusterError> {
         Err(error) => return Err(error.into()),
     };
     if !present {
-        let mut progress = engine.pull_image(image, "").boxed();
+        let mut progress = engine.pull_image(image, "", None).boxed();
         while let Some(event) = progress.next().await {
             event?;
         }

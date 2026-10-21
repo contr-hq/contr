@@ -22,6 +22,10 @@ service NetworksService {
   rpc RemoveNetwork(RemoveNetworkRequest) returns (RemoveNetworkResponse);
   // Deletes user-defined networks no container is connected to.
   rpc PruneNetworks(PruneNetworksRequest) returns (PruneNetworksResponse);
+  // Connects a container to a network; fails with NOT_FOUND when either does not exist.
+  rpc ConnectNetwork(ConnectNetworkRequest) returns (ConnectNetworkResponse);
+  // Disconnects a container from a network.
+  rpc DisconnectNetwork(DisconnectNetworkRequest) returns (DisconnectNetworkResponse);
   // Reports which of the given ports a program on this computer already holds, so clients can warn before
   // publishing them.
   rpc CheckHostPorts(CheckHostPortsRequest) returns (CheckHostPortsResponse);
@@ -109,6 +113,26 @@ message RemoveNetworkRequest {
 }
 
 message RemoveNetworkResponse {}
+
+message ConnectNetworkRequest {
+  string network = 1;
+  // Container ID, unique ID prefix or name.
+  string container = 2;
+  // Further names the container answers to on this network.
+  repeated string aliases = 3;
+}
+
+message ConnectNetworkResponse {}
+
+message DisconnectNetworkRequest {
+  string network = 1;
+  // Container ID, unique ID prefix or name.
+  string container = 2;
+  // Disconnects a container the engine cannot reach cleanly, such as one that is restarting.
+  bool force = 3;
+}
+
+message DisconnectNetworkResponse {}
 
 message PruneNetworksRequest {}
 

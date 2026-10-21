@@ -105,6 +105,49 @@ pub struct PulledImage {
     pub image_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PushImageRequest {
+    /// Repository and tag, such as "registry.corp/team/app:1.2"; one without a tag pushes latest.
+    #[prost(string, tag = "1")]
+    pub reference: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PushImageResponse {
+    #[prost(oneof = "push_image_response::Event", tags = "1, 2")]
+    pub event: ::core::option::Option<push_image_response::Event>,
+}
+/// Nested message and enum types in `PushImageResponse`.
+pub mod push_image_response {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Event {
+        /// Engine status line such as "Pushing 12.3 MB of 40.1 MB" or "Layer already exists".
+        #[prost(string, tag = "1")]
+        Status(::prost::alloc::string::String),
+        /// Last message of the stream.
+        #[prost(message, tag = "2")]
+        Pushed(super::PushedImage),
+    }
+}
+/// Image a completed push stored in its registry.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PushedImage {
+    #[prost(string, tag = "1")]
+    pub reference: ::prost::alloc::string::String,
+    /// Manifest digest such as "sha256:0123..."; empty when the engine reported none.
+    #[prost(string, tag = "2")]
+    pub digest: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TagImageRequest {
+    /// Image ID, tag or digest reference.
+    #[prost(string, tag = "1")]
+    pub source: ::prost::alloc::string::String,
+    /// Repository and tag, such as "registry.corp/team/app:1.2"; one without a tag gets latest.
+    #[prost(string, tag = "2")]
+    pub target: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TagImageResponse {}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RemoveImageRequest {
     /// Image ID, tag or digest reference.
     #[prost(string, tag = "1")]
@@ -317,7 +360,8 @@ pub mod images_service_client {
                 .insert(GrpcMethod::new("contr.images.v1.ImagesService", "WatchImages"));
             self.inner.server_streaming(req, path, codec).await
         }
-        /// Pulls an image and streams per-layer progress; cancelling the call cancels the pull.
+        /// Pulls an image with the credentials `docker login` stored for its registry and streams per-layer progress;
+        /// cancelling the call cancels the pull.
         pub async fn pull_image(
             &mut self,
             request: impl tonic::IntoRequest<super::PullImageRequest>,
@@ -341,6 +385,58 @@ pub mod images_service_client {
             req.extensions_mut()
                 .insert(GrpcMethod::new("contr.images.v1.ImagesService", "PullImage"));
             self.inner.server_streaming(req, path, codec).await
+        }
+        /// Pushes a local tag to its registry with the credentials `docker login` stored and streams per-layer progress;
+        /// cancelling the call cancels the push.
+        pub async fn push_image(
+            &mut self,
+            request: impl tonic::IntoRequest<super::PushImageRequest>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::PushImageResponse>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.images.v1.ImagesService/PushImage",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("contr.images.v1.ImagesService", "PushImage"));
+            self.inner.server_streaming(req, path, codec).await
+        }
+        /// Adds a tag to a local image; fails with NOT_FOUND when the source is not local and INVALID_ARGUMENT when the
+        /// target is not a valid reference.
+        pub async fn tag_image(
+            &mut self,
+            request: impl tonic::IntoRequest<super::TagImageRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::TagImageResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.images.v1.ImagesService/TagImage",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("contr.images.v1.ImagesService", "TagImage"));
+            self.inner.unary(req, path, codec).await
         }
         /// Removes one reference to an image and deletes the image once nothing references it.
         pub async fn remove_image(
@@ -463,11 +559,33 @@ pub mod images_service_server {
             >
             + std::marker::Send
             + 'static;
-        /// Pulls an image and streams per-layer progress; cancelling the call cancels the pull.
+        /// Pulls an image with the credentials `docker login` stored for its registry and streams per-layer progress;
+        /// cancelling the call cancels the pull.
         async fn pull_image(
             &self,
             request: tonic::Request<super::PullImageRequest>,
         ) -> std::result::Result<tonic::Response<Self::PullImageStream>, tonic::Status>;
+        /// Server streaming response type for the PushImage method.
+        type PushImageStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::PushImageResponse, tonic::Status>,
+            >
+            + std::marker::Send
+            + 'static;
+        /// Pushes a local tag to its registry with the credentials `docker login` stored and streams per-layer progress;
+        /// cancelling the call cancels the push.
+        async fn push_image(
+            &self,
+            request: tonic::Request<super::PushImageRequest>,
+        ) -> std::result::Result<tonic::Response<Self::PushImageStream>, tonic::Status>;
+        /// Adds a tag to a local image; fails with NOT_FOUND when the source is not local and INVALID_ARGUMENT when the
+        /// target is not a valid reference.
+        async fn tag_image(
+            &self,
+            request: tonic::Request<super::TagImageRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::TagImageResponse>,
+            tonic::Status,
+        >;
         /// Removes one reference to an image and deletes the image once nothing references it.
         async fn remove_image(
             &self,
@@ -703,6 +821,97 @@ pub mod images_service_server {
                                 max_encoding_message_size,
                             );
                         let res = grpc.server_streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.images.v1.ImagesService/PushImage" => {
+                    #[allow(non_camel_case_types)]
+                    struct PushImageSvc<T: ImagesService>(pub Arc<T>);
+                    impl<
+                        T: ImagesService,
+                    > tonic::server::ServerStreamingService<super::PushImageRequest>
+                    for PushImageSvc<T> {
+                        type Response = super::PushImageResponse;
+                        type ResponseStream = T::PushImageStream;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::ResponseStream>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::PushImageRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ImagesService>::push_image(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = PushImageSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.server_streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.images.v1.ImagesService/TagImage" => {
+                    #[allow(non_camel_case_types)]
+                    struct TagImageSvc<T: ImagesService>(pub Arc<T>);
+                    impl<
+                        T: ImagesService,
+                    > tonic::server::UnaryService<super::TagImageRequest>
+                    for TagImageSvc<T> {
+                        type Response = super::TagImageResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::TagImageRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ImagesService>::tag_image(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = TagImageSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
                         Ok(res)
                     };
                     Box::pin(fut)

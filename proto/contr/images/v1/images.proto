@@ -12,8 +12,15 @@ service ImagesService {
   rpc ListImages(ListImagesRequest) returns (ListImagesResponse);
   // Streams the image list, then every change to it.
   rpc WatchImages(WatchImagesRequest) returns (stream WatchImagesResponse);
-  // Pulls an image and streams per-layer progress; cancelling the call cancels the pull.
+  // Pulls an image with the credentials `docker login` stored for its registry and streams per-layer progress;
+  // cancelling the call cancels the pull.
   rpc PullImage(PullImageRequest) returns (stream PullImageResponse);
+  // Pushes a local tag to its registry with the credentials `docker login` stored and streams per-layer progress;
+  // cancelling the call cancels the push.
+  rpc PushImage(PushImageRequest) returns (stream PushImageResponse);
+  // Adds a tag to a local image; fails with NOT_FOUND when the source is not local and INVALID_ARGUMENT when the
+  // target is not a valid reference.
+  rpc TagImage(TagImageRequest) returns (TagImageResponse);
   // Removes one reference to an image and deletes the image once nothing references it.
   rpc RemoveImage(RemoveImageRequest) returns (RemoveImageResponse);
   // Deletes images no container uses.
@@ -88,6 +95,36 @@ message PulledImage {
   string reference = 1;
   string image_id = 2;
 }
+
+message PushImageRequest {
+  // Repository and tag, such as "registry.corp/team/app:1.2"; one without a tag pushes latest.
+  string reference = 1;
+}
+
+message PushImageResponse {
+  oneof event {
+    // Engine status line such as "Pushing 12.3 MB of 40.1 MB" or "Layer already exists".
+    string status = 1;
+    // Last message of the stream.
+    PushedImage pushed = 2;
+  }
+}
+
+// Image a completed push stored in its registry.
+message PushedImage {
+  string reference = 1;
+  // Manifest digest such as "sha256:0123..."; empty when the engine reported none.
+  string digest = 2;
+}
+
+message TagImageRequest {
+  // Image ID, tag or digest reference.
+  string source = 1;
+  // Repository and tag, such as "registry.corp/team/app:1.2"; one without a tag gets latest.
+  string target = 2;
+}
+
+message TagImageResponse {}
 
 message RemoveImageRequest {
   // Image ID, tag or digest reference.

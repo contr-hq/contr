@@ -22,9 +22,11 @@ use contr_sdk::api::engine::v1::{
     EngineState, ResetRequest, ResetScope, StartRequest, StopRequest, StreamUsageRequest, reset_response,
     start_response, stop_response,
 };
-use contr_sdk::api::images::v1::InspectImageRequest;
+use contr_sdk::api::images::v1::{InspectImageRequest, PushImageRequest, TagImageRequest, push_image_response};
 use contr_sdk::api::kubernetes::v1::{ClusterState, GetClusterRequest, ImportImagesRequest, SetCurrentContextRequest};
-use contr_sdk::api::networks::v1::{CheckHostPortsRequest, HostPort};
+use contr_sdk::api::networks::v1::{
+    CheckHostPortsRequest, ConnectNetworkRequest, DisconnectNetworkRequest, HostPort, InspectNetworkRequest,
+};
 use contr_sdk::api::settings::v1::{
     EngineSettings, GetSettingsRequest, ProxyMode, ProxySettings, RegistrySettings, ResetSettingsRequest, Settings,
     UpdateSettingsRequest,
@@ -512,6 +514,143 @@ async fn bundles_carry_the_daemon_and_engine_state_without_credentials() {
     assert!(everything.contains("http://<redacted>@proxy.corp:3128"));
     assert!(everything.contains("Authorization: <redacted>"));
     assert!(!everything.contains("hunter2"));
+
+    daemon.stop().await;
+}
+
+#[tokio::test]
+async fn images_are_tagged_and_pushed() {
+    let daemon = Daemon::start();
+    let client = daemon.client().await;
+    start_engine(&client).await;
+
+    client
+        .images()
+        .tag_image(TagImageRequest {
+            source: "alpine:3.22".to_owned(),
+            target: "registry.corp:5000/team/base".to_owned(),
+        })
+        .await
+        .unwrap();
+    let tags = client
+        .images()
+        .inspect_image(InspectImageRequest {
+            reference: "alpine:3.22".to_owned(),
+        })
+        .await
+        .unwrap()
+        .into_inner()
+        .image
+        .unwrap()
+        .repo_tags;
+    assert_eq!(tags, ["alpine:3.22", "registry.corp:5000/team/base:latest"]);
+    let missing = client
+        .images()
+        .tag_image(TagImageRequest {
+            source: "busybox".to_owned(),
+            target: "x".to_owned(),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(Error::from(missing), Error::NotFound(_)));
+
+    let mut events = client
+        .images()
+        .push_image(PushImageRequest {
+            reference: "registry.corp:5000/team/base".to_owned(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    let (mut statuses, mut pushed) = (Vec::new(), None);
+    while let Some(event) = events.message().await.unwrap() {
+        match event.event.unwrap() {
+            push_image_response::Event::Status(status) => statuses.push(status),
+            push_image_response::Event::Pushed(image) => pushed = Some(image),
+        }
+    }
+    assert!(
+        statuses.contains(&"Pushing 0.0 MB of 0.0 MB".to_owned()),
+        "{statuses:?}"
+    );
+    let pushed = pushed.unwrap();
+    assert_eq!(pushed.reference, "registry.corp:5000/team/base:latest");
+    assert!(pushed.digest.starts_with("sha256:"), "{}", pushed.digest);
+
+    let mut refused = client
+        .images()
+        .push_image(PushImageRequest {
+            reference: "registry.corp:5000/team/absent:1".to_owned(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    let failure = loop {
+        match refused.message().await {
+            Ok(Some(_)) => {}
+            Ok(None) => panic!("the push of a missing tag succeeded"),
+            Err(status) => break status,
+        }
+    };
+    assert!(
+        failure.message().contains("does not exist locally"),
+        "{}",
+        failure.message()
+    );
+
+    daemon.stop().await;
+}
+
+#[tokio::test]
+async fn containers_join_and_leave_networks() {
+    let daemon = Daemon::start();
+    let client = daemon.client().await;
+    start_engine(&client).await;
+    let connect = ConnectNetworkRequest {
+        network: "bridge".to_owned(),
+        container: "migrate".to_owned(),
+        aliases: vec!["jobs".to_owned()],
+    };
+
+    client.networks().connect_network(connect.clone()).await.unwrap();
+    let network = client
+        .networks()
+        .inspect_network(InspectNetworkRequest {
+            id: "bridge".to_owned(),
+        })
+        .await
+        .unwrap()
+        .into_inner()
+        .raw_json;
+    assert!(network.contains(r#""Name":"migrate""#), "{network}");
+    let container = client
+        .containers()
+        .inspect_container(InspectContainerRequest {
+            id: "migrate".to_owned(),
+        })
+        .await
+        .unwrap()
+        .into_inner()
+        .raw_json;
+    assert!(container.contains(r#""Aliases":["jobs"]"#), "{container}");
+
+    let disconnect = DisconnectNetworkRequest {
+        network: "bridge".to_owned(),
+        container: "migrate".to_owned(),
+        force: false,
+    };
+    client.networks().disconnect_network(disconnect.clone()).await.unwrap();
+    let again = client.networks().disconnect_network(disconnect).await.unwrap_err();
+    assert!(matches!(Error::from(again), Error::Conflict(_)));
+    let unknown = client
+        .networks()
+        .connect_network(ConnectNetworkRequest {
+            container: "absent".to_owned(),
+            ..connect
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(Error::from(unknown), Error::NotFound(_)));
 
     daemon.stop().await;
 }
