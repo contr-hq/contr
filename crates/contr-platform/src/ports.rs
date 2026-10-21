@@ -41,11 +41,19 @@ mod tests {
 
     #[test]
     fn reports_a_held_port_until_it_is_released() {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let (port, listeners) = loop {
+            let ipv4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).unwrap();
+            let port = ipv4.local_addr().unwrap().port();
+            // Another program may hold the same port number on the IPv6 loopback address.
+            match TcpListener::bind((Ipv6Addr::LOCALHOST, port)) {
+                Ok(ipv6) => break (port, vec![ipv4, ipv6]),
+                Err(error) if error.kind() == io::ErrorKind::AddrInUse => {}
+                Err(_) => break (port, vec![ipv4]),
+            }
+        };
 
         assert!(in_use(port, Transport::Tcp));
-        drop(listener);
+        drop(listeners);
         assert!(!in_use(port, Transport::Tcp));
     }
 }
