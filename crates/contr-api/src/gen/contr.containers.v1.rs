@@ -28,6 +28,9 @@ pub struct Container {
         ::prost::alloc::string::String,
         ::prost::alloc::string::String,
     >,
+    /// Names of the networks the container is connected to; watch streams send the container again when it changes.
+    #[prost(string, repeated, tag = "11")]
+    pub networks: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// Exposed container port and, when published, its host binding.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

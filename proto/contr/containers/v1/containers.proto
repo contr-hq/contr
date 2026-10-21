@@ -64,6 +64,8 @@ message Container {
   string status = 8;
   repeated PortMapping ports = 9;
   map<string, string> labels = 10;
+  // Names of the networks the container is connected to; watch streams send the container again when it changes.
+  repeated string networks = 11;
 }
 
 enum ContainerState {

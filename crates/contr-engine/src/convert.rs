@@ -30,7 +30,15 @@ pub(crate) fn container(summary: docker::ContainerSummary) -> containers::Contai
         status: summary.status.unwrap_or_default(),
         ports: summary.ports.unwrap_or_default().into_iter().map(port).collect(),
         labels: summary.labels.unwrap_or_default(),
+        networks: network_names(summary.network_settings.and_then(|settings| settings.networks)),
     }
+}
+
+/// Names of the networks in a container's network settings, sorted so equal sets compare equal.
+pub(crate) fn network_names(networks: Option<HashMap<String, docker::EndpointSettings>>) -> Vec<String> {
+    let mut names: Vec<String> = networks.unwrap_or_default().into_keys().collect();
+    names.sort();
+    names
 }
 
 fn container_state(state: docker::ContainerSummaryStateEnum) -> containers::ContainerState {

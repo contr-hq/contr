@@ -26,6 +26,8 @@ const CHANGE_QUEUE: usize = 256;
 const RESYNC_INTERVAL: Duration = Duration::from_secs(30);
 const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 const WATCHED_EVENT_TYPES: [&str; 4] = ["container", "image", "volume", "network"];
+/// Attribute of a network's connect and disconnect events that holds the container's ID.
+const NETWORK_EVENT_CONTAINER: &str = "container";
 const IGNORED_CONTAINER_ACTIONS: [&str; 9] = [
     "attach",
     "detach",
@@ -243,7 +245,10 @@ impl Collections {
 
     async fn apply(&self, engine: &Engine, event: EventMessage) {
         let action = event.action.unwrap_or_default();
-        let id = event.actor.and_then(|actor| actor.id).unwrap_or_default();
+        let (id, mut attributes) = event
+            .actor
+            .map(|actor| (actor.id.unwrap_or_default(), actor.attributes.unwrap_or_default()))
+            .unwrap_or_default();
 
         let result = match event.typ {
             Some(EventMessageTypeEnum::CONTAINER) => self.apply_container_event(engine, &action, &id).await,
@@ -270,6 +275,10 @@ impl Collections {
                     self.networks.remove(&id);
                     Ok(())
                 }
+                "connect" | "disconnect" => match attributes.remove(NETWORK_EVENT_CONTAINER) {
+                    Some(container) => self.refresh_container_networks(engine, &container).await,
+                    None => Ok(()),
+                },
                 _ => Ok(()),
             },
             _ => Ok(()),
@@ -289,6 +298,21 @@ impl Collections {
         } else {
             self.refresh_container(engine, id).await
         }
+    }
+
+    /// The engine announces a connection before its container list shows it, so this reads inspection instead.
+    async fn refresh_container_networks(&self, engine: &Engine, id: &str) -> Result<(), EngineError> {
+        let Some(mut container) = self.containers.get(id) else {
+            return self.refresh_container(engine, id).await;
+        };
+        match engine.container_networks(id).await? {
+            Some(networks) => {
+                container.networks = networks;
+                self.containers.upsert(container);
+            }
+            None => self.containers.remove(id),
+        }
+        Ok(())
     }
 
     async fn refresh_container(&self, engine: &Engine, id: &str) -> Result<(), EngineError> {
@@ -363,6 +387,10 @@ impl<T: Keyed + Clone + PartialEq + Send + Sync + 'static> Collection<T> {
 
     fn list(&self) -> Vec<T> {
         self.lock().values().cloned().collect()
+    }
+
+    fn get(&self, key: &str) -> Option<T> {
+        self.lock().get(key).cloned()
     }
 
     fn upsert(&self, item: T) {
