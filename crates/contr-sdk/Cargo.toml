@@ -27,10 +27,12 @@ zbus.workspace = true
 [dev-dependencies]
 bytes.workspace = true
 contr-daemon.workspace = true
+contr-diagnostics.workspace = true
 prost-types.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+zip.workspace = true
 
 [lints]
 workspace = true

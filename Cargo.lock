@@ -455,6 +455,7 @@ dependencies = [
  "contr-backend-wsl",
  "contr-compose",
  "contr-core",
+ "contr-diagnostics",
  "contr-engine",
  "contr-kube",
  "contr-platform",
@@ -584,6 +585,7 @@ dependencies = [
  "contr-api",
  "contr-core",
  "contr-daemon",
+ "contr-diagnostics",
  "contr-transport",
  "futures-util",
  "prost",
@@ -597,6 +599,7 @@ dependencies = [
  "tonic-types",
  "tracing",
  "zbus",
+ "zip",
 ]
 
 [[package]]

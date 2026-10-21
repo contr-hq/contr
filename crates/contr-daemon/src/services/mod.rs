@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use contr_backend::{Backend, BackendKind, Capability, EngineSupervisor};
+use contr_diagnostics::LogRing;
 use futures_util::stream::{self, BoxStream};
 use futures_util::{Stream, StreamExt};
 use tonic::Status;
@@ -55,6 +56,7 @@ pub(crate) struct Shared {
     /// Docker CLI context the daemon keeps pointed at the engine; `None` when it manages none.
     pub(crate) docker_context: Option<DockerContext>,
     pub(crate) kubernetes: Arc<KubernetesHub>,
+    pub(crate) log: Option<LogRing>,
 }
 
 /// A watch stream ends only when its engine cache closes, which clients see as `ENGINE_NOT_RUNNING`.

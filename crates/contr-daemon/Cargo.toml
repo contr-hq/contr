@@ -30,6 +30,7 @@ contr-api = { workspace = true, features = ["server"] }
 contr-backend.workspace = true
 contr-compose.workspace = true
 contr-core.workspace = true
+contr-diagnostics.workspace = true
 contr-engine.workspace = true
 contr-kube.workspace = true
 contr-platform.workspace = true

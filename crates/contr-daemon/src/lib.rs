@@ -26,6 +26,7 @@ use contr_api::settings::v1::settings_service_server::SettingsServiceServer;
 use contr_api::volumes::v1::volumes_service_server::VolumesServiceServer;
 use contr_backend::{Backend, BackendKind, EngineConnector, EngineHealth, EngineSupervisor, SupervisorConfig};
 use contr_core::{paths, product};
+use contr_diagnostics::LogRing;
 use contr_transport::{DiscoveryFile, Endpoint, Listener, TransportError};
 use tonic::transport::Server;
 
@@ -76,6 +77,8 @@ pub struct Config {
     pub compose: Option<PathBuf>,
     /// Kubeconfig file that receives the cluster's context instead of the one kubectl writes to.
     pub kubeconfig: Option<PathBuf>,
+    /// The daemon's recent log, which diagnostics bundles carry.
+    pub log: Option<LogRing>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -136,6 +139,7 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
         settings,
         docker_context: context,
         kubernetes,
+        log: config.log.clone(),
     });
 
     let endpoint = listener.endpoint();
