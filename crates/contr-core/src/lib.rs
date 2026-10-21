@@ -4,6 +4,7 @@
 
 mod error;
 pub mod guest;
+pub mod kube;
 pub mod paths;
 pub mod product;
 pub mod proxy;
