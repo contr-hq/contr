@@ -1,11 +1,12 @@
 use std::collections::BTreeSet;
 use std::io;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use contr_backend::{
-    Backend, BackendError, BackendKind, Blocker, Capability, Check, CheckStatus, EngineConnector, IntegrationState,
-    Probe, Progress, ProgressSink, RemediationOutcome, ResetScope, WslDistribution, WslIntegration,
+    Backend, BackendError, BackendKind, BackendSettings, Blocker, Capability, Check, CheckStatus, EngineConnector,
+    IntegrationState, Probe, Progress, ProgressSink, RemediationOutcome, ResetScope, WslDistribution, WslIntegration,
 };
 use contr_core::{ErrorReason, Remediation, paths, product};
 use tokio::sync::Mutex;
@@ -26,29 +27,24 @@ pub struct WslBackend {
     images_dir: PathBuf,
     disks_dir: PathBuf,
     engine_pipe: String,
-    shared_pipes: Vec<String>,
+    default_pipe: AtomicBool,
     integrations: Integrations,
     session: Mutex<Option<Session>>,
 }
 
 impl WslBackend {
-    /// Backend that installs the guest images described by the manifest in `images_dir`; with `default_pipe` it also
-    /// serves the Docker CLI's default pipe whenever no other program owns it. The `integrated` distributions reach
-    /// the engine while it runs.
-    pub fn new(images_dir: PathBuf, default_pipe: bool, integrated: BTreeSet<String>) -> io::Result<Self> {
+    /// Backend that installs the guest images described by the manifest in `images_dir`. The `integrated`
+    /// distributions reach the engine while it runs, and the Docker CLI's default pipe is served once
+    /// [`Backend::apply_settings`] asks for it.
+    pub fn new(images_dir: PathBuf, integrated: BTreeSet<String>) -> io::Result<Self> {
         let disks_dir = paths::wsl_dir().ok_or_else(|| io::Error::other("LOCALAPPDATA is not set"))?;
         let engine_pipe = product::engine_pipe_name(&contr_transport::current_user_sid()?);
-        let shared_pipes = if default_pipe {
-            vec![DOCKER_DEFAULT_PIPE.to_owned()]
-        } else {
-            Vec::new()
-        };
 
         Ok(Self {
             images_dir,
             disks_dir,
             engine_pipe,
-            shared_pipes,
+            default_pipe: AtomicBool::new(false),
             integrations: Integrations::new(integrated),
             session: Mutex::new(None),
         })
@@ -56,6 +52,15 @@ impl WslBackend {
 
     fn connector(&self) -> EngineConnector {
         EngineConnector::NamedPipe(self.engine_pipe.clone())
+    }
+
+    /// Pipes besides the per-user one that the next session serves when no other program owns them.
+    fn shared_pipes(&self) -> Vec<String> {
+        if self.default_pipe.load(Ordering::Relaxed) {
+            vec![DOCKER_DEFAULT_PIPE.to_owned()]
+        } else {
+            Vec::new()
+        }
     }
 }
 
@@ -143,7 +148,7 @@ impl Backend for WslBackend {
             product::WSL_RUNTIME_DISTRO,
             product::WSL_DATA_DISTRO,
             &self.engine_pipe,
-            &self.shared_pipes,
+            &self.shared_pipes(),
             &self.integrations,
         )
         .await?;
@@ -160,6 +165,11 @@ impl Backend for WslBackend {
         session.stop().await;
 
         Ok(())
+    }
+
+    fn apply_settings(&self, settings: BackendSettings) {
+        self.default_pipe
+            .store(settings.serve_default_endpoint, Ordering::Relaxed);
     }
 
     fn remediations(&self) -> &'static [Remediation] {
@@ -292,7 +302,7 @@ impl WslBackend {
         const ID: &str = "default-pipe";
         const TITLE: &str = "Standard Docker pipe";
 
-        if !self.shared_pipes.iter().any(|pipe| pipe == DOCKER_DEFAULT_PIPE) {
+        if !self.default_pipe.load(Ordering::Relaxed) {
             return None;
         }
         let mut session = self.session.lock().await;
