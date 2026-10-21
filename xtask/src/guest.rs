@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -5,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, ensure};
 use contr_core::guest;
+use sha2::{Digest, Sha256};
 
 use crate::docker;
 
@@ -23,6 +25,7 @@ pub(crate) fn build(root: &Path, arch: &str) -> anyhow::Result<()> {
             .arg(root.join("guest/Dockerfile"))
             .args(["--platform", &format!("linux/{arch}"), "--target", target])
             .args(["--build-arg", &format!("CONTR_RELEASE={release}")])
+            .args(["--build-arg", &format!("CONTR_CACHE={}", cache_name(root))])
             .arg("--output")
             .arg(format!("type=tar,dest={}", out.join(file).display()))
             .arg(root)
@@ -38,6 +41,15 @@ pub(crate) fn build(root: &Path, arch: &str) -> anyhow::Result<()> {
     )?;
     println!("{release}: {}", out.display());
     Ok(())
+}
+
+/// Build cache name of the source tree at `root`.
+fn cache_name(root: &Path) -> String {
+    let digest = Sha256::digest(root.as_os_str().as_encoded_bytes());
+    digest[..6].iter().fold(String::new(), |mut name, byte| {
+        let _ = write!(name, "{byte:02x}");
+        name
+    })
 }
 
 /// Workspace version plus the commit. A build from uncommitted changes also carries its build time, so `contrd`
