@@ -13,8 +13,12 @@ name = "contr-helper"
 path = "src/main.rs"
 
 [dependencies]
+anyhow.workspace = true
 clap.workspace = true
 contr-core.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["user"] }
 
 [lints]
 workspace = true
