@@ -23,7 +23,7 @@ use contr_sdk::api::engine::v1::{
 use contr_sdk::{Client, ClientIdentity, Error};
 
 #[derive(Parser)]
-#[command(name = product::CLI_BINARY, version, about)]
+#[command(name = product::CLI_BINARY, version = product::VERSION, about)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -100,7 +100,7 @@ fn main() -> ExitCode {
 async fn run(command: Command) -> anyhow::Result<i32> {
     let identity = ClientIdentity {
         name: product::CLI_BINARY.to_owned(),
-        version: env!("CARGO_PKG_VERSION").to_owned(),
+        version: product::VERSION.to_owned(),
     };
 
     match command {

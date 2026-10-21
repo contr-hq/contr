@@ -3,6 +3,16 @@
 /// Name shown to users.
 pub const DISPLAY_NAME: &str = "Contr";
 
+/// Version of this build: `CONTR_VERSION` when it was built, which release builds set from their tag, else the
+/// workspace version.
+pub const VERSION: &str = match option_env!("CONTR_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
+/// GitHub API endpoint that lists the published releases of the core.
+pub const RELEASES_API: &str = "https://api.github.com/repos/contr-hq/contr/releases";
+
 /// Lowercase stem of the derived identifiers below.
 pub const SLUG: &str = "contr";
 

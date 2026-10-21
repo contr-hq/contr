@@ -311,7 +311,7 @@ fn docker_context(config: &Config, kind: BackendKind) -> Option<DockerContext> {
 fn write_discovery(path: PathBuf, endpoint: &Endpoint) -> Option<PathBuf> {
     let file = DiscoveryFile {
         pid: std::process::id(),
-        version: env!("CARGO_PKG_VERSION").to_owned(),
+        version: product::VERSION.to_owned(),
         api_revision: contr_api::API_REVISION,
         endpoints: vec![endpoint.to_string()],
     };

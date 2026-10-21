@@ -39,7 +39,7 @@ impl Default for ClientIdentity {
     fn default() -> Self {
         Self {
             name: format!("{}-sdk", product::SLUG),
-            version: env!("CARGO_PKG_VERSION").to_owned(),
+            version: product::VERSION.to_owned(),
         }
     }
 }

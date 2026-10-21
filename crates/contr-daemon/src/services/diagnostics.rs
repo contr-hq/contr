@@ -144,7 +144,7 @@ async fn write_bundle(shared: &Shared, redactor: Redactor, step: impl Fn(&str)) 
     bundle.add_json(
         "contrd.json",
         json!({
-            "version": env!("CARGO_PKG_VERSION"),
+            "version": contr_core::product::VERSION,
             "apiRevision": contr_api::API_REVISION,
             "os": std::env::consts::OS,
             "arch": std::env::consts::ARCH,
