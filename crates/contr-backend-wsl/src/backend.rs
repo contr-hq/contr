@@ -9,7 +9,9 @@ use contr_backend::{
     EngineSettings, IntegrationState, Probe, Progress, ProgressSink, RemediationOutcome, ResetScope, WslDistribution,
     WslIntegration,
 };
+use contr_core::guest::EngineConfig;
 use contr_core::{ErrorReason, Remediation, paths, product};
+use serde_json::{Map, Value};
 use tokio::sync::Mutex;
 
 use crate::engine_config;
@@ -184,6 +186,21 @@ impl Backend for WslBackend {
             .store(settings.serve_default_endpoint, Ordering::Relaxed);
         if let Ok(mut engine) = self.engine.lock() {
             *engine = settings.engine;
+        }
+    }
+
+    async fn check_daemon_config(&self, daemon: &Map<String, Value>) -> Result<(), String> {
+        let config = EngineConfig {
+            daemon: daemon.clone(),
+            certificates: String::new(),
+        };
+        match wsl::configure(product::WSL_RUNTIME_DISTRO, &config, wsl::Configure::Check).await {
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => Err(error.to_string()),
+            Err(error) => {
+                tracing::info!(%error, "cannot ask the engine about daemon.json; its next start will");
+                Ok(())
+            }
+            Ok(()) => Ok(()),
         }
     }
 
