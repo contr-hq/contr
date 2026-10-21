@@ -68,6 +68,7 @@ impl SettingsHub {
                     ProxyMode::Manual => ProxyChoice::Manual(configured.proxy.manual()),
                     ProxyMode::None => ProxyChoice::Direct,
                 },
+                pass_proxy_to_containers: configured.proxy.pass_to_containers,
                 trust_system_certificates: configured.certificates.trust_system,
                 registry_mirrors: configured.registry.mirrors.clone(),
                 daemon: configured.engine.daemon_json.clone(),

@@ -131,6 +131,12 @@ fn with_value(path: &str, value: &str) -> anyhow::Result<Settings> {
             .push_str(value);
             settings.proxy = Some(proxy);
         }
+        "proxy.pass_to_containers" => {
+            settings.proxy = Some(ProxySettings {
+                pass_to_containers: flag()?,
+                ..Default::default()
+            });
+        }
         "certificates.trust_system" => {
             settings.certificates = Some(CertificateSettings { trust_system: flag()? });
         }
@@ -175,6 +181,7 @@ fn print(state: &SettingsState) {
         ("proxy.http", proxy.http),
         ("proxy.https", proxy.https),
         ("proxy.exclude", proxy.exclude),
+        ("proxy.pass_to_containers", proxy.pass_to_containers.to_string()),
         (
             "certificates.trust_system",
             settings.certificates.unwrap_or_default().trust_system.to_string(),
@@ -196,4 +203,17 @@ fn print(state: &SettingsState) {
     .collect();
 
     print!("{}", format::table(&["SETTING", "VALUE", ""], &rows));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn passing_the_proxy_to_containers_takes_a_flag() {
+        let settings = with_value("proxy.pass_to_containers", "on").unwrap();
+
+        assert!(settings.proxy.unwrap().pass_to_containers);
+        assert!(with_value("proxy.pass_to_containers", "sometimes").is_err());
+    }
 }

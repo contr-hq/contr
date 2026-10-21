@@ -42,6 +42,10 @@ pub struct ProxySettings {
     /// Manual mode: destinations reached directly, as a NO_PROXY list such as ".corp.example.com,10.0.0.0/8".
     #[prost(string, tag = "4")]
     pub exclude: ::prost::alloc::string::String,
+    /// New containers and builds also receive the engine's proxy as HTTP_PROXY, HTTPS_PROXY and NO_PROXY, in upper and
+    /// lower case, unless they set the variable themselves.
+    #[prost(bool, tag = "5")]
+    pub pass_to_containers: bool,
 }
 /// Certificates the engine trusts. Applies only where DaemonService.GetInfo reports CAPABILITY_ENGINE_CONFIGURATION,
 /// from the next engine start.

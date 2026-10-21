@@ -51,6 +51,9 @@ message ProxySettings {
   string https = 3;
   // Manual mode: destinations reached directly, as a NO_PROXY list such as ".corp.example.com,10.0.0.0/8".
   string exclude = 4;
+  // New containers and builds also receive the engine's proxy as HTTP_PROXY, HTTPS_PROXY and NO_PROXY, in upper and
+  // lower case, unless they set the variable themselves.
+  bool pass_to_containers = 5;
 }
 
 enum ProxyMode {
