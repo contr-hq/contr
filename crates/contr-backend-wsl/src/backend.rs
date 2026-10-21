@@ -82,6 +82,7 @@ impl Backend for WslBackend {
             Capability::Reset,
             Capability::EngineConfiguration,
             Capability::Compose,
+            Capability::Kubernetes,
         ]
     }
 

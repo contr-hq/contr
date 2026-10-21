@@ -18,6 +18,7 @@ use contr_sdk::api::engine::v1::{
     start_response, stop_response,
 };
 use contr_sdk::api::images::v1::InspectImageRequest;
+use contr_sdk::api::kubernetes::v1::{ClusterState, GetClusterRequest, ImportImagesRequest, SetCurrentContextRequest};
 use contr_sdk::api::networks::v1::{CheckHostPortsRequest, HostPort};
 use contr_sdk::api::settings::v1::{
     EngineSettings, GetSettingsRequest, ProxyMode, ProxySettings, RegistrySettings, ResetSettingsRequest, Settings,
@@ -65,6 +66,7 @@ impl Daemon {
             settings_file: Some(dir.path().join("settings.json")),
             admin_settings: Some(dir.path().join("admin-settings.json")),
             compose: None,
+            kubeconfig: Some(dir.path().join("kubeconfig")),
         };
         let (shutdown, signal) = oneshot::channel();
         let task = tokio::spawn(contr_daemon::run(config, async {
@@ -851,6 +853,59 @@ async fn compose_projects_group_the_containers_compose_created() {
     assert_eq!(unknown.code(), tonic::Code::NotFound);
 
     drop(watch);
+    daemon.stop().await;
+}
+
+#[tokio::test]
+async fn kubernetes_starts_disabled_and_switches_contexts_in_its_kubeconfig() {
+    let dir = tempfile::tempdir().unwrap();
+    let kubeconfig = dir.path().join("kubeconfig");
+    std::fs::write(
+        &kubeconfig,
+        "apiVersion: v1\nkind: Config\ncurrent-context: staging-eu\ncontexts:\n- name: staging-eu\n  context: {}\n",
+    )
+    .unwrap();
+    let daemon = Daemon::start_in(dir);
+    let client = daemon.client().await;
+    let mut kubernetes = client.kubernetes();
+
+    let cluster = kubernetes
+        .get_cluster(GetClusterRequest {})
+        .await
+        .unwrap()
+        .into_inner()
+        .cluster
+        .unwrap();
+    assert_eq!(cluster.state(), ClusterState::Disabled);
+    assert_eq!(cluster.available_versions[0], "v1.37.1");
+    assert_eq!(cluster.api_server, "https://127.0.0.1:6443");
+    assert_eq!(cluster.current_context, "staging-eu");
+
+    let switched = kubernetes
+        .set_current_context(SetCurrentContextRequest { current: true })
+        .await
+        .unwrap()
+        .into_inner()
+        .cluster
+        .unwrap();
+    assert_eq!(switched.current_context, "contr");
+    let restored = kubernetes
+        .set_current_context(SetCurrentContextRequest { current: false })
+        .await
+        .unwrap()
+        .into_inner()
+        .cluster
+        .unwrap();
+    assert_eq!(restored.current_context, "staging-eu");
+
+    let refused = kubernetes
+        .import_images(ImportImagesRequest {
+            images: vec!["alpine:3.20".to_owned()],
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), tonic::Code::FailedPrecondition);
+
     daemon.stop().await;
 }
 

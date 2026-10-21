@@ -47,6 +47,9 @@ struct Args {
     /// Compose CLI plugin to run instead of the bundled one or the one the Docker CLI would run.
     #[arg(long)]
     compose: Option<PathBuf>,
+    /// Kubeconfig file that receives the cluster's context instead of the one kubectl writes to.
+    #[arg(long)]
+    kubeconfig: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -96,6 +99,7 @@ fn main() -> anyhow::Result<()> {
         cli_dir: args.cli_dir,
         docker_context: !args.no_docker_context,
         compose: args.compose,
+        kubeconfig: args.kubeconfig,
     };
 
     tokio::runtime::Builder::new_multi_thread()

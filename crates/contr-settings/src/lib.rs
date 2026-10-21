@@ -20,6 +20,7 @@ pub struct Configured {
     pub proxy: Proxy,
     pub certificates: Certificates,
     pub registry: Registry,
+    pub kubernetes: Kubernetes,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,8 +115,29 @@ pub struct Registry {
     pub mirrors: Vec<String>,
 }
 
+/// The single-node cluster.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Kubernetes {
+    pub enabled: bool,
+    /// One of [`contr_core::kube::VERSIONS`]; empty runs the default.
+    pub version: String,
+    pub traefik: bool,
+}
+
+impl Kubernetes {
+    /// The version the cluster runs.
+    pub fn version(&self) -> &str {
+        if self.version.is_empty() {
+            contr_core::kube::VERSIONS[0]
+        } else {
+            &self.version
+        }
+    }
+}
+
 /// Every path a user may change and an administrator may fix.
-pub const PATHS: [&str; 10] = [
+pub const PATHS: [&str; 13] = [
     "engine.start_with_daemon",
     "engine.serve_default_pipe",
     "engine.daemon_json",
@@ -126,6 +148,9 @@ pub const PATHS: [&str; 10] = [
     "proxy.pass_to_containers",
     "certificates.trust_system",
     "registry.mirrors",
+    "kubernetes.enabled",
+    "kubernetes.version",
+    "kubernetes.traefik",
 ];
 
 /// URL schemes of a proxy server the engine connects through.
@@ -140,6 +165,13 @@ impl Configured {
         }
         for mirror in &self.registry.mirrors {
             check_url("registry.mirrors", mirror, &["http", "https"])?;
+        }
+        let version = &self.kubernetes.version;
+        if !version.is_empty() && !contr_core::kube::VERSIONS.contains(&version.as_str()) {
+            return Err(SettingsError::InvalidValue {
+                path: "kubernetes.version",
+                reason: format!("{version} is not one of {}", contr_core::kube::VERSIONS.join(", ")),
+            });
         }
         if let Some((key, instead)) = CONTR_DAEMON_KEYS
             .iter()
@@ -216,6 +248,9 @@ pub struct Settings {
     /// Compose projects the user added, each by its Compose files.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub compose_projects: Vec<ComposeProject>,
+    /// kubectl's current context before the user made the cluster's context current.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_kube_context: Option<String>,
     #[serde(flatten)]
     stored: Map<String, Value>,
 }
@@ -563,6 +598,36 @@ mod tests {
             "engine.daemon_json: registry-mirrors is not available: set registry.mirrors instead"
         );
         assert!(matches!(with(json!("{}")), Err(SettingsError::Value(_))));
+    }
+
+    #[test]
+    fn kubernetes_runs_a_listed_version() {
+        let mut settings = Settings::default();
+        assert_eq!(
+            effective(&settings, &Map::new())
+                .unwrap()
+                .configured
+                .kubernetes
+                .version(),
+            contr_core::kube::VERSIONS[0]
+        );
+
+        settings.set("kubernetes.version", json!("v1.36.5")).unwrap();
+        assert_eq!(
+            effective(&settings, &Map::new())
+                .unwrap()
+                .configured
+                .kubernetes
+                .version(),
+            "v1.36.5"
+        );
+        settings.set("kubernetes.version", json!("v1.20.0")).unwrap();
+        assert!(
+            effective(&settings, &Map::new())
+                .unwrap_err()
+                .to_string()
+                .starts_with("kubernetes.version: v1.20.0 is not one of ")
+        );
     }
 
     #[test]

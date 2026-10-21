@@ -31,6 +31,7 @@ contr-backend.workspace = true
 contr-compose.workspace = true
 contr-core.workspace = true
 contr-engine.workspace = true
+contr-kube.workspace = true
 contr-platform.workspace = true
 contr-settings.workspace = true
 serde_json.workspace = true

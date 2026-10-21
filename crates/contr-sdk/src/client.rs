@@ -12,6 +12,7 @@ use contr_api::engine::v1::engine_service_client::EngineServiceClient;
 use contr_api::engine::v1::{WatchStateRequest, WatchStateResponse};
 use contr_api::images::v1::images_service_client::ImagesServiceClient;
 use contr_api::integration::v1::integration_service_client::IntegrationServiceClient;
+use contr_api::kubernetes::v1::kubernetes_service_client::KubernetesServiceClient;
 use contr_api::networks::v1::networks_service_client::NetworksServiceClient;
 use contr_api::settings::v1::settings_service_client::SettingsServiceClient;
 use contr_api::volumes::v1::volumes_service_client::VolumesServiceClient;
@@ -142,6 +143,11 @@ impl Client {
     /// Compose projects service.
     pub fn compose(&self) -> ComposeServiceClient<Channel> {
         ComposeServiceClient::new(self.channel.clone())
+    }
+
+    /// Kubernetes cluster service.
+    pub fn kubernetes(&self) -> KubernetesServiceClient<Channel> {
+        KubernetesServiceClient::new(self.channel.clone())
     }
 
     /// Daemon and engine description.
