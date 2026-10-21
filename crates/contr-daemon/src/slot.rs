@@ -75,6 +75,11 @@ impl EngineSlot {
         }
     }
 
+    /// The handle now and after every change; `None` while the engine is not running.
+    pub(crate) fn subscribe(&self) -> watch::Receiver<Option<Arc<EngineHandle>>> {
+        self.current.clone()
+    }
+
     pub(crate) fn info(&self) -> Option<EngineInfo> {
         self.current.borrow().as_ref().map(|handle| handle.info.clone())
     }

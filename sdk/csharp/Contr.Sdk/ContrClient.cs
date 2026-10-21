@@ -7,6 +7,7 @@ using Contr.Sdk.Diagnostics.V1;
 using Contr.Sdk.Engine.V1;
 using Contr.Sdk.Images.V1;
 using Contr.Sdk.Integration.V1;
+using Contr.Sdk.Kubernetes.V1;
 using Contr.Sdk.Networks.V1;
 using Contr.Sdk.Settings.V1;
 using Contr.Sdk.Volumes.V1;
@@ -35,6 +36,7 @@ public sealed class ContrClient : IDisposable
         Volumes = new VolumesService.VolumesServiceClient(channel);
         Networks = new NetworksService.NetworksServiceClient(channel);
         Compose = new ComposeService.ComposeServiceClient(channel);
+        Kubernetes = new KubernetesService.KubernetesServiceClient(channel);
         Integration = new IntegrationService.IntegrationServiceClient(channel);
         Diagnostics = new DiagnosticsService.DiagnosticsServiceClient(channel);
         Settings = new SettingsService.SettingsServiceClient(channel);
@@ -69,6 +71,9 @@ public sealed class ContrClient : IDisposable
 
     /// <summary>Compose projects service.</summary>
     public ComposeService.ComposeServiceClient Compose { get; }
+
+    /// <summary>Kubernetes cluster service.</summary>
+    public KubernetesService.KubernetesServiceClient Kubernetes { get; }
 
     /// <summary>Integration with the user's tools: Docker CLI tools and WSL distributions.</summary>
     public IntegrationService.IntegrationServiceClient Integration { get; }

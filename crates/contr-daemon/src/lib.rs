@@ -1,6 +1,7 @@
 //! The Contr daemon: composes a backend, its supervisor, the engine cache and the gRPC services, and serves them on
 //! the per-user local endpoint.
 
+mod kubernetes;
 mod services;
 mod settings;
 mod slot;
@@ -19,6 +20,7 @@ use contr_api::diagnostics::v1::diagnostics_service_server::DiagnosticsServiceSe
 use contr_api::engine::v1::engine_service_server::EngineServiceServer;
 use contr_api::images::v1::images_service_server::ImagesServiceServer;
 use contr_api::integration::v1::integration_service_server::IntegrationServiceServer;
+use contr_api::kubernetes::v1::kubernetes_service_server::KubernetesServiceServer;
 use contr_api::networks::v1::networks_service_server::NetworksServiceServer;
 use contr_api::settings::v1::settings_service_server::SettingsServiceServer;
 use contr_api::volumes::v1::volumes_service_server::VolumesServiceServer;
@@ -27,9 +29,10 @@ use contr_core::{paths, product};
 use contr_transport::{DiscoveryFile, Endpoint, Listener, TransportError};
 use tonic::transport::Server;
 
+use crate::kubernetes::KubernetesHub;
 use crate::services::{
     CliLocations, ComposeApi, ContainersApi, DaemonApi, DiagnosticsApi, EngineApi, ImagesApi, IntegrationApi,
-    NetworksApi, SettingsApi, Shared, VolumesApi, WslAccess,
+    KubernetesApi, NetworksApi, SettingsApi, Shared, VolumesApi, WslAccess,
 };
 use crate::settings::SettingsHub;
 use crate::slot::{DockerContext, EngineSlot};
@@ -71,6 +74,8 @@ pub struct Config {
     pub admin_settings: Option<PathBuf>,
     /// Compose CLI plugin instead of the bundled one or the one the Docker CLI would run.
     pub compose: Option<PathBuf>,
+    /// Kubeconfig file that receives the cluster's context instead of the one kubectl writes to.
+    pub kubeconfig: Option<PathBuf>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -114,6 +119,11 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
     }
     let context = docker_context(&config, backend.kind());
     let slot = EngineSlot::spawn(&supervisor, context.clone());
+    let kubernetes = KubernetesHub::spawn(
+        &slot,
+        &settings,
+        config.kubeconfig.clone().or_else(contr_kube::kubeconfig::default_path),
+    );
     let shared = Arc::new(Shared {
         supervisor,
         slot,
@@ -125,6 +135,7 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
         backend: Arc::clone(&backend),
         settings,
         docker_context: context,
+        kubernetes,
     });
 
     let endpoint = listener.endpoint();
@@ -155,6 +166,7 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
             Arc::clone(&shared),
             config.compose.clone(),
         )))
+        .add_service(KubernetesServiceServer::new(KubernetesApi(Arc::clone(&shared))))
         .add_service(NetworksServiceServer::new(NetworksApi(shared)))
         .serve_with_incoming_shutdown(listener.incoming(), shutdown)
         .await;

@@ -178,6 +178,11 @@ fn settings(configured: &Configured) -> proto::Settings {
         registry: Some(proto::RegistrySettings {
             mirrors: configured.registry.mirrors.clone(),
         }),
+        kubernetes: Some(proto::KubernetesSettings {
+            enabled: configured.kubernetes.enabled,
+            version: configured.kubernetes.version.clone(),
+            traefik: configured.kubernetes.traefik,
+        }),
     }
 }
 
@@ -185,6 +190,7 @@ fn settings(configured: &Configured) -> proto::Settings {
 fn value(settings: &proto::Settings, path: &str) -> Result<Value, Status> {
     let engine = settings.engine.clone().unwrap_or_default();
     let proxy = settings.proxy.clone().unwrap_or_default();
+    let kubernetes = settings.kubernetes.clone().unwrap_or_default();
     Ok(match path {
         "engine.start_with_daemon" => json!(engine.start_with_daemon),
         "engine.serve_default_pipe" => json!(engine.serve_default_pipe),
@@ -201,6 +207,9 @@ fn value(settings: &proto::Settings, path: &str) -> Result<Value, Status> {
         "proxy.pass_to_containers" => json!(proxy.pass_to_containers),
         "certificates.trust_system" => json!(settings.certificates.unwrap_or_default().trust_system),
         "registry.mirrors" => json!(settings.registry.clone().unwrap_or_default().mirrors),
+        "kubernetes.enabled" => json!(kubernetes.enabled),
+        "kubernetes.version" => json!(kubernetes.version),
+        "kubernetes.traefik" => json!(kubernetes.traefik),
         _ => return Err(Status::invalid_argument(format!("{path} is not a setting"))),
     })
 }

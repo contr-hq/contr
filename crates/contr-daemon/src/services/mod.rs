@@ -7,6 +7,7 @@ mod diagnostics;
 mod engine;
 mod images;
 mod integration;
+mod kubernetes;
 mod networks;
 mod settings;
 mod volumes;
@@ -26,10 +27,12 @@ pub(crate) use diagnostics::DiagnosticsApi;
 pub(crate) use engine::EngineApi;
 pub(crate) use images::ImagesApi;
 pub(crate) use integration::{CliLocations, IntegrationApi, WslAccess};
+pub(crate) use kubernetes::KubernetesApi;
 pub(crate) use networks::NetworksApi;
 pub(crate) use settings::SettingsApi;
 pub(crate) use volumes::VolumesApi;
 
+use crate::kubernetes::KubernetesHub;
 use crate::settings::SettingsHub;
 use crate::slot::{DockerContext, EngineSlot};
 use crate::status;
@@ -51,6 +54,7 @@ pub(crate) struct Shared {
     pub(crate) settings: Arc<SettingsHub>,
     /// Docker CLI context the daemon keeps pointed at the engine; `None` when it manages none.
     pub(crate) docker_context: Option<DockerContext>,
+    pub(crate) kubernetes: Arc<KubernetesHub>,
 }
 
 /// A watch stream ends only when its engine cache closes, which clients see as `ENGINE_NOT_RUNNING`.
