@@ -41,6 +41,24 @@ impl Engine {
         Ok(summaries.into_iter().next().map(convert::container))
     }
 
+    /// Names of the networks container `id` is connected to, or `None` when it does not exist; unlike
+    /// [`Engine::find_container`], it reflects a connection the engine just announced.
+    pub(crate) async fn container_networks(&self, id: &str) -> Result<Option<Vec<String>>, EngineError> {
+        match self
+            .docker()
+            .inspect_container(id, None::<InspectContainerOptions>)
+            .await
+        {
+            Ok(inspect) => Ok(Some(convert::network_names(
+                inspect.network_settings.and_then(|settings| settings.networks),
+            ))),
+            Err(error) => match EngineError::from(error) {
+                EngineError::NotFound(_) => Ok(None),
+                error => Err(error),
+            },
+        }
+    }
+
     /// Summary, details and the inspect document of one container.
     pub async fn inspect_container(&self, reference: &str) -> Result<InspectContainerResponse, EngineError> {
         let inspect = self

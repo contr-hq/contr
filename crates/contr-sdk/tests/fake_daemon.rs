@@ -611,8 +611,29 @@ async fn containers_join_and_leave_networks() {
         container: "migrate".to_owned(),
         aliases: vec!["jobs".to_owned()],
     };
+    let mut watch = client
+        .containers()
+        .watch_containers(WatchContainersRequest {})
+        .await
+        .unwrap()
+        .into_inner();
+    let Some(Event::Snapshot(snapshot)) = watch.message().await.unwrap().unwrap().event else {
+        panic!("a watch starts with a snapshot");
+    };
+    let migrate = snapshot
+        .containers
+        .iter()
+        .find(|container| container.names == ["migrate"]);
+    assert_eq!(migrate.unwrap().networks, ["shop_default"]);
+    let mut next_networks = async || loop {
+        let event = tokio::time::timeout(STARTUP_TIMEOUT, watch.message()).await.unwrap();
+        if let Some(Event::Upserted(container)) = event.unwrap().unwrap().event {
+            break container.networks;
+        }
+    };
 
     client.networks().connect_network(connect.clone()).await.unwrap();
+    assert_eq!(next_networks().await, ["bridge", "shop_default"]);
     let network = client
         .networks()
         .inspect_network(InspectNetworkRequest {
@@ -640,6 +661,7 @@ async fn containers_join_and_leave_networks() {
         force: false,
     };
     client.networks().disconnect_network(disconnect.clone()).await.unwrap();
+    assert_eq!(next_networks().await, ["shop_default"]);
     let again = client.networks().disconnect_network(disconnect).await.unwrap_err();
     assert!(matches!(Error::from(again), Error::Conflict(_)));
     let unknown = client
@@ -652,6 +674,7 @@ async fn containers_join_and_leave_networks() {
         .unwrap_err();
     assert!(matches!(Error::from(unknown), Error::NotFound(_)));
 
+    drop(watch);
     daemon.stop().await;
 }
 

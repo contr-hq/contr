@@ -4,7 +4,7 @@ use contr_api::containers::v1::Protocol;
 use contr_api::networks::v1 as proto;
 use contr_api::networks::v1::networks_service_server::NetworksService;
 use contr_api::networks::v1::watch_networks_response::Event;
-use contr_engine::Change;
+use contr_engine::{Change, EngineCache};
 use contr_platform::ports::{self, Transport};
 use tonic::{Request, Response, Status};
 
@@ -101,6 +101,7 @@ impl NetworksService for NetworksApi {
             .await
             .map_err(status::from_engine)?;
         handle.cache.refresh_networks().await;
+        refresh_container(&handle.cache, &request.container).await;
 
         Ok(Response::new(proto::ConnectNetworkResponse {}))
     }
@@ -117,6 +118,7 @@ impl NetworksService for NetworksApi {
             .await
             .map_err(status::from_engine)?;
         handle.cache.refresh_networks().await;
+        refresh_container(&handle.cache, &request.container).await;
 
         Ok(Response::new(proto::DisconnectNetworkResponse {}))
     }
@@ -162,5 +164,12 @@ fn host_port_status(port: proto::HostPort) -> proto::HostPortStatus {
     proto::HostPortStatus {
         port: Some(port),
         in_use,
+    }
+}
+
+/// The engine sends no event when a stopped container joins or leaves a network.
+async fn refresh_container(cache: &EngineCache, reference: &str) {
+    if let Some(id) = cache.resolve_container(reference) {
+        cache.refresh_container(&id).await;
     }
 }
