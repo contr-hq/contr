@@ -1,0 +1,100 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    paths:
+      - .cargo/config.toml
+      - .github/workflows/release.yml
+      - guest/**
+      - packaging/**
+      - xtask/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-assets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo xtask guest
+      - run: cargo xtask windows-cli
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-assets
+          path: |
+            target/guest
+            target/windows-cli
+          if-no-files-found: error
+
+  windows-binaries:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked --package contr-daemon --package contr-cli
+      - name: The binaries need no Visual C++ Redistributable
+        shell: pwsh
+        run: |
+          $dumpbin = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio", "${env:ProgramFiles(x86)}\Microsoft Visual Studio" `
+              -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
+              Where-Object FullName -like '*Hostx64*x64*' | Select-Object -First 1 -ExpandProperty FullName
+          foreach ($exe in 'contrd.exe', 'contr.exe') {
+              $imports = & $dumpbin /nologo /dependents "target/release/$exe" | Out-String
+              if ($imports -match '(?i)vcruntime|msvcp') { throw "$exe imports the Visual C++ runtime" }
+          }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-binaries
+          path: |
+            target/release/contrd.exe
+            target/release/contr.exe
+          if-no-files-found: error
+
+  payload:
+    needs: [linux-assets, windows-binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-assets
+          path: target
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-binaries
+          path: target/windows-binaries
+      - run: cargo xtask dist-windows --binaries target/windows-binaries
+      - name: Archive the payload
+        run: |
+          label=$([[ "$GITHUB_REF" == refs/tags/v* ]] && echo "$GITHUB_REF_NAME" || git rev-parse --short=12 HEAD)
+          cd target/dist
+          zip -qr "contr-core-windows-x64-$label.zip" contr-core-windows-x64
+          sha256sum contr-core-windows-x64-*.zip > SHA256SUMS
+      - uses: actions/upload-artifact@v7
+        with:
+          name: contr-core-windows-x64
+          path: |
+            target/dist/contr-core-windows-x64-*.zip
+            target/dist/SHA256SUMS
+          if-no-files-found: error
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" target/dist/contr-core-windows-x64-*.zip target/dist/SHA256SUMS --verify-tag --generate-notes
