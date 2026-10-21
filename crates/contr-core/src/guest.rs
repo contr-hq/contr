@@ -3,6 +3,9 @@
 
 use std::net::Ipv4Addr;
 
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
+
 /// Absolute path of the agent inside every guest image.
 pub const AGENT_PATH: &str = "/usr/local/bin/contr-agent";
 
@@ -47,3 +50,12 @@ pub const INTEGRATION_READY: &str = "contr integration ready";
 /// File next to the guest images that names them and their release, as JSON with the keys `release`, `runtime`
 /// and `data`.
 pub const MANIFEST_FILE: &str = "guest.json";
+
+/// What the engine uses from its next start, which `contr-agent configure` reads as JSON on standard input.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct EngineConfig {
+    /// The engine's `daemon.json`.
+    pub daemon: Map<String, Value>,
+    /// PEM certificates the engine trusts besides the guest's own.
+    pub certificates: String,
+}
