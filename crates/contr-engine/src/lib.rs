@@ -11,6 +11,7 @@ mod exec;
 mod images;
 mod networks;
 mod stats;
+mod system;
 mod usage;
 mod volumes;
 
@@ -18,3 +19,4 @@ pub use cache::{Change, EngineCache};
 pub use engine::{Engine, ping};
 pub use error::EngineError;
 pub use exec::{ExecOutput, ExecSession};
+pub use system::{RunOutput, SystemContainer};
