@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use contr_daemon::{BackendChoice, Config};
 use contr_sdk::api::compose::v1::{Action, ListProjectsRequest, RunActionRequest, WatchProjectsRequest};
+use contr_sdk::api::containers::v1::LogStream;
 use contr_sdk::api::containers::v1::watch_containers_response::Event;
 use contr_sdk::api::containers::v1::{
     ContainerState, CreateContainerRequest, InspectContainerRequest, KillContainerRequest, PauseContainerRequest,
@@ -905,6 +906,53 @@ async fn kubernetes_starts_disabled_and_switches_contexts_in_its_kubeconfig() {
         .await
         .unwrap_err();
     assert_eq!(refused.code(), tonic::Code::FailedPrecondition);
+
+    daemon.stop().await;
+}
+
+#[tokio::test]
+async fn the_fake_engine_streams_logs() {
+    let daemon = Daemon::start();
+    let client = daemon.client().await;
+    start_engine(&client).await;
+
+    let mut chunks = client
+        .containers()
+        .stream_logs(contr_sdk::api::containers::v1::StreamLogsRequest {
+            id: "shop-web-1".to_owned(),
+            tail_lines: Some(2),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    let mut lines = Vec::new();
+    while let Some(chunk) = chunks.message().await.unwrap() {
+        lines.push((chunk.stream(), String::from_utf8_lossy(&chunk.data).trim().to_owned()));
+    }
+    assert_eq!(
+        lines,
+        [
+            (
+                LogStream::Stderr,
+                "shop-web-1 found no configuration file; using defaults".to_owned()
+            ),
+            (LogStream::Stdout, "shop-web-1 is ready".to_owned()),
+        ]
+    );
+
+    let mut project = client
+        .compose()
+        .stream_logs(contr_sdk::api::compose::v1::StreamLogsRequest {
+            project: "shop".to_owned(),
+            services: vec!["web".to_owned()],
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    let first = project.message().await.unwrap().unwrap();
+    assert_eq!(first.service, "web");
 
     daemon.stop().await;
 }
