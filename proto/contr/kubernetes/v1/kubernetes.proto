@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+package contr.kubernetes.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Contr.Sdk.Kubernetes.V1";
+
+// The single-node Kubernetes cluster: k3s running as a container on the engine. The settings kubernetes.enabled,
+// kubernetes.version and kubernetes.traefik decide what runs; this service reports it and maintains it. Available where
+// DaemonService.GetInfo reports CAPABILITY_KUBERNETES.
+service KubernetesService {
+  // Returns the cluster's state.
+  rpc GetCluster(GetClusterRequest) returns (GetClusterResponse);
+  // Streams the cluster's state, starting with the current one and again after every change.
+  rpc WatchCluster(WatchClusterRequest) returns (stream WatchClusterResponse);
+  // Deletes the cluster's container and data, then starts a new cluster when it is enabled; images on the engine
+  // stay. The state is CLUSTER_STATE_STOPPING when it returns. Fails with ENGINE_NOT_RUNNING while the engine is not
+  // running.
+  rpc ResetCluster(ResetClusterRequest) returns (ResetClusterResponse);
+  // Copies images from the engine into the cluster, so pods use them without a registry, and streams each image's
+  // outcome. Fails with FAILED_PRECONDITION while the cluster is not ready.
+  rpc ImportImages(ImportImagesRequest) returns (stream ImportImagesResponse);
+  // Makes the cluster's context kubectl's current context, or restores the context that was current before.
+  rpc SetCurrentContext(SetCurrentContextRequest) returns (SetCurrentContextResponse);
+}
+
+message Cluster {
+  ClusterState state = 1;
+  // k3s version of the running server, such as "v1.37.1+k3s1"; empty while none runs.
+  string version = 2;
+  // URL kubectl reaches the API server at, such as "https://127.0.0.1:6443".
+  string api_server = 3;
+  // Kubeconfig file that holds the cluster's context.
+  string kubeconfig = 4;
+  // Name of the cluster's context in that file.
+  string context = 5;
+  // kubectl's current context; empty when the file names none.
+  string current_context = 6;
+  google.protobuf.Timestamp started_at = 7;
+  // Steps of turning the cluster on, in order; empty unless the cluster is starting or failed to start.
+  repeated Step steps = 8;
+  // Pods of the kube-system namespace, sorted by name; empty unless the cluster is ready.
+  repeated Pod system_pods = 9;
+  // Versions kubernetes.version takes, newest first; the first is the default.
+  repeated string available_versions = 10;
+  // Why the cluster failed; set only in CLUSTER_STATE_FAILED.
+  string error = 11;
+  // Etag of the settings this state follows: after UpdateSettings returns an etag, states carrying it or a later one
+  // reflect the change.
+  string settings_etag = 12;
+}
+
+enum ClusterState {
+  CLUSTER_STATE_UNSPECIFIED = 0;
+  // kubernetes.enabled is off.
+  CLUSTER_STATE_DISABLED = 1;
+  // The cluster is enabled and the engine is not running.
+  CLUSTER_STATE_WAITING_FOR_ENGINE = 2;
+  CLUSTER_STATE_STARTING = 3;
+  CLUSTER_STATE_READY = 4;
+  CLUSTER_STATE_STOPPING = 5;
+  CLUSTER_STATE_FAILED = 6;
+}
+
+message Step {
+  StepKind kind = 1;
+  StepStatus status = 2;
+  // What the step did or is doing, such as "378 MB" or "127.0.0.1:6443".
+  string detail = 3;
+  google.protobuf.Timestamp started_at = 4;
+  google.protobuf.Timestamp finished_at = 5;
+}
+
+enum StepKind {
+  STEP_KIND_UNSPECIFIED = 0;
+  STEP_KIND_PULL_IMAGE = 1;
+  STEP_KIND_START_SERVER = 2;
+  STEP_KIND_WAIT_FOR_NODE = 3;
+  STEP_KIND_ADD_KUBECONFIG = 4;
+}
+
+enum StepStatus {
+  STEP_STATUS_UNSPECIFIED = 0;
+  STEP_STATUS_PENDING = 1;
+  STEP_STATUS_RUNNING = 2;
+  STEP_STATUS_DONE = 3;
+  STEP_STATUS_FAILED = 4;
+}
+
+message Pod {
+  string name = 1;
+  // Kubernetes pod phase, such as "Running" or "Succeeded".
+  string phase = 2;
+  uint32 ready_containers = 3;
+  uint32 containers = 4;
+}
+
+message GetClusterRequest {}
+
+message GetClusterResponse {
+  Cluster cluster = 1;
+}
+
+message WatchClusterRequest {}
+
+message WatchClusterResponse {
+  Cluster cluster = 1;
+}
+
+message ResetClusterRequest {}
+
+message ResetClusterResponse {}
+
+message ImportImagesRequest {
+  // Image references on the engine, such as "shop-api:dev".
+  repeated string images = 1;
+}
+
+message ImportImagesResponse {
+  string image = 1;
+  // Why the image was not imported; empty when it was.
+  string error = 2;
+}
+
+message SetCurrentContextRequest {
+  // True makes the cluster's context current; false restores the context that was current before.
+  bool current = 1;
+}
+
+message SetCurrentContextResponse {
+  Cluster cluster = 1;
+}

@@ -40,6 +40,11 @@ pub mod contr {
             include!("contr.integration.v1.rs");
         }
     }
+    pub mod kubernetes {
+        pub mod v1 {
+            include!("contr.kubernetes.v1.rs");
+        }
+    }
     pub mod networks {
         pub mod v1 {
             include!("contr.networks.v1.rs");
