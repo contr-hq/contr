@@ -3,6 +3,7 @@
 mod dist;
 mod docker;
 mod guest;
+mod guest_sources;
 mod notices;
 mod windows_cli;
 
@@ -29,6 +30,8 @@ enum Task {
     },
     /// Fetch the Docker CLI tools for Windows that contrd installs per user into target/windows-cli.
     WindowsCli,
+    /// Fetch the exact source of every Alpine package in the images in target/guest into target/guest-sources.
+    GuestSources,
     /// Assemble the Windows core payload the client installer carries from Windows builds of contrd and contr,
     /// target/guest and target/windows-cli.
     DistWindows {
@@ -60,6 +63,7 @@ fn main() -> anyhow::Result<()> {
         }
         Task::Guest { arch } => guest::build(&root, &arch)?,
         Task::WindowsCli => windows_cli::build(&root)?,
+        Task::GuestSources => guest_sources::fetch(&root)?,
         Task::DistWindows { binaries, out } => dist::windows(&root, &binaries, &out)?,
         Task::DistLinux { binaries, out } => dist::linux(&root, &binaries, &out)?,
     }
