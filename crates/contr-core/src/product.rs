@@ -21,6 +21,9 @@ pub const AGENT_BINARY: &str = "contr-agent";
 /// Executable name of the privileged Linux helper.
 pub const HELPER_BINARY: &str = "contr-helper";
 
+/// Where Linux packages install the privileged helper; the polkit policy authorizes this path only.
+pub const INSTALLED_HELPER: &str = "/usr/libexec/contr/contr-helper";
+
 /// Docker CLI context that points at the engine Contr manages.
 pub const DOCKER_CONTEXT: &str = "contr";
 
