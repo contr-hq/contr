@@ -5,7 +5,7 @@ use contr_api::common::v1 as common;
 use contr_api::diagnostics::v1 as proto;
 use contr_api::diagnostics::v1::diagnostics_service_server::DiagnosticsService;
 use contr_api::diagnostics::v1::run_remediation_response::Event;
-use contr_backend::{Backend, Check, CheckStatus, EngineState, Progress, ProgressSink};
+use contr_backend::{Backend, BackendError, Check, CheckStatus, EngineState, Progress, ProgressSink};
 use contr_core::Remediation;
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
@@ -73,6 +73,10 @@ impl DiagnosticsService for DiagnosticsApi {
                         logout_required: outcome.logout_required,
                     })),
                 }),
+                Err(error @ BackendError::Dismissed) => Err(Status::cancelled(format!(
+                    "{} did not run: {error}",
+                    remediation.action_id
+                ))),
                 Err(error) => Err(Status::failed_precondition(format!(
                     "{} failed: {error}",
                     remediation.action_id

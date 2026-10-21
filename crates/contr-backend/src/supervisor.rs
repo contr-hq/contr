@@ -110,6 +110,7 @@ impl From<BackendError> for OperationError {
                 remediations: blocker.remediations,
             },
             BackendError::Io(error) => Self::new(ErrorReason::EngineNotRunning, error.to_string()),
+            error @ BackendError::Dismissed => Self::new(ErrorReason::EngineNotRunning, error.to_string()),
         }
     }
 }

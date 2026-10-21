@@ -65,6 +65,9 @@ pub enum Error {
         /// Actions that resolve the failure, in the order to offer them.
         remediations: Vec<Remediation>,
     },
+    /// The user dismissed a prompt the operation needs, so nothing changed.
+    #[error("{0}")]
+    Dismissed(String),
     /// The call ended before the operation could be sent.
     #[error("the call has ended")]
     Closed,
@@ -129,6 +132,7 @@ impl From<Status> for Error {
                 remediations,
             },
             (None, Code::NotFound) => Self::NotFound(message),
+            (None, Code::Cancelled) => Self::Dismissed(message),
             (None, Code::FailedPrecondition | Code::AlreadyExists | Code::Aborted) => Self::Conflict(message),
             (None, _) => Self::Rpc(status),
         }
@@ -210,6 +214,7 @@ mod tests {
             Error::from(Status::unimplemented("x")),
             Error::FeatureUnavailable(_)
         ));
+        assert!(matches!(Error::from(Status::cancelled("x")), Error::Dismissed(_)));
         assert!(matches!(Error::from(Status::internal("x")), Error::Rpc(_)));
     }
 }

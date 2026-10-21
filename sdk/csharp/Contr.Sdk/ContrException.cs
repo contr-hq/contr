@@ -47,6 +47,7 @@ public class ContrException : Exception
             (ErrorReason.Unspecified, StatusCode.FailedPrecondition or StatusCode.AlreadyExists or StatusCode.Aborted) =>
                 new ConflictException(message, exception),
             (ErrorReason.Unspecified, StatusCode.Unavailable) => new DaemonUnavailableException(message, exception),
+            (ErrorReason.Unspecified, StatusCode.Cancelled) => new DismissedException(message, exception),
             _ => new ContrException(message, reason, remediations, exception),
         };
     }
@@ -68,6 +69,10 @@ public sealed class NotFoundException(string message, Exception? inner)
 
 /// <summary>The object already exists, or its state forbids the request.</summary>
 public sealed class ConflictException(string message, Exception? inner)
+    : ContrException(message, ErrorReason.Unspecified, [], inner);
+
+/// <summary>The user dismissed a prompt the operation needs, so nothing changed.</summary>
+public sealed class DismissedException(string message, Exception? inner)
     : ContrException(message, ErrorReason.Unspecified, [], inner);
 
 /// <summary>The daemon or its backend does not support the request; hide the feature.</summary>
