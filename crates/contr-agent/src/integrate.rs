@@ -70,6 +70,7 @@ pub(crate) async fn integrate(distribution: &str, owner: u32) -> anyhow::Result<
         drives_root: guest::WINDOWS_DRIVES.to_owned(),
         distro_root: Some(root.path.to_string_lossy().into_owned()),
         host_alias: true,
+        proxy: None,
     });
 
     let mut stdout = tokio::io::stdout();

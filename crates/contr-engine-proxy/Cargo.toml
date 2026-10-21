@@ -10,6 +10,8 @@ publish.workspace = true
 
 [dependencies]
 bytes.workspace = true
+contr-core.workspace = true
+form_urlencoded.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
@@ -20,6 +22,8 @@ tokio = { workspace = true, features = ["io-util", "macros", "rt"] }
 tracing.workspace = true
 
 [dev-dependencies]
+futures-util.workspace = true
+hyper = { workspace = true, features = ["http2"] }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "time"] }
 
 [lints]

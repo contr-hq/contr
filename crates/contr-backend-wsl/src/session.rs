@@ -167,6 +167,7 @@ fn relay(listener: Listener, opener: Opener) -> JoinHandle<()> {
         drives_root: guest::WINDOWS_DRIVES.to_owned(),
         distro_root: None,
         host_alias: true,
+        proxy: None,
     });
     tokio::spawn(async move {
         let mut incoming = listener.incoming();

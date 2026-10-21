@@ -1,10 +1,12 @@
 //! Docker Engine API proxy between clients outside a Linux guest and the engine inside it. Container definitions get
-//! guest paths for their bind sources and a `host.docker.internal` alias; every other request, upgrades included,
-//! passes through unchanged.
+//! guest paths for their bind sources and a `host.docker.internal` alias; with a proxy, new containers and builds also
+//! get its variables (ADR 0009). Every other request, upgrades included, passes through unchanged.
 
 #![warn(missing_docs)]
 
+mod buildkit;
 mod rewrite;
+mod variables;
 
 use std::convert::Infallible;
 use std::future::Future;
@@ -12,7 +14,7 @@ use std::io;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use http::{HeaderValue, Request, Response, StatusCode, header};
+use http::{HeaderValue, Request, Response, StatusCode, Uri, header};
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::body::Incoming;
@@ -21,6 +23,7 @@ use hyper_util::rt::TokioIo;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub use rewrite::Rewrites;
+use rewrite::Target;
 
 /// Largest container definition the proxy reads to rewrite.
 const MAX_DEFINITION: usize = 16 * 1024 * 1024;
@@ -76,11 +79,23 @@ where
     Fut: Future<Output = io::Result<E>>,
     E: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    let target = rewrite::target(request.method(), request.uri().path());
     let client_upgrade = request
         .headers()
         .contains_key(header::UPGRADE)
         .then(|| hyper::upgrade::on(&mut request));
-    let request = if rewrite::targets(request.method(), request.uri().path()) {
+    if target == Some(Target::Build)
+        && let Some(variables) = rewrites.proxy_variables()
+        && let Some(query) = rewrite::build_query(request.uri().query().unwrap_or_default(), &variables)
+    {
+        if let Some(uri) = with_query(request.uri(), &query) {
+            *request.uri_mut() = uri;
+        } else {
+            tracing::warn!("cannot add the proxy to a build's arguments");
+        }
+    }
+    let buildkit = rewrites.proxy_variables().filter(|_| target == Some(Target::BuildKit));
+    let request = if target == Some(Target::ContainerCreate) {
         rewrite_definition(request, rewrites).await?
     } else {
         request.map(|body| body.map_err(BoxError::from).boxed())
@@ -99,7 +114,14 @@ where
         tokio::spawn(async move {
             match tokio::try_join!(client_upgrade, engine_upgrade) {
                 Ok((client, engine)) => {
-                    let _ = tokio::io::copy_bidirectional(&mut TokioIo::new(client), &mut TokioIo::new(engine)).await;
+                    let (mut client, mut engine) = (TokioIo::new(client), TokioIo::new(engine));
+                    if let Some(variables) = buildkit {
+                        if let Err(error) = buildkit::relay(client, engine, variables).await {
+                            tracing::debug!(%error, "BuildKit session ended");
+                        }
+                    } else {
+                        let _ = tokio::io::copy_bidirectional(&mut client, &mut engine).await;
+                    }
                 }
                 Err(error) => tracing::debug!(%error, "cannot complete the upgrade"),
             }
@@ -126,6 +148,14 @@ async fn rewrite_definition(request: Request<Incoming>, rewrites: &Rewrites) -> 
         parts,
         Full::new(body).map_err(|never| match never {}).boxed(),
     ))
+}
+
+/// `uri` with `query` in place of its query.
+fn with_query(uri: &Uri, query: &str) -> Option<Uri> {
+    let mut parts = uri.clone().into_parts();
+    parts.path_and_query = Some(format!("{}?{query}", uri.path()).parse().ok()?);
+
+    Uri::from_parts(parts).ok()
 }
 
 fn bad_gateway(error: &ProxyError) -> Response<Body> {
