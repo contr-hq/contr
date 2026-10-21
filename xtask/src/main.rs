@@ -1,5 +1,6 @@
 //! Repository automation, run as `cargo xtask <task>`.
 
+mod dist;
 mod docker;
 mod guest;
 mod windows_cli;
@@ -27,6 +28,16 @@ enum Task {
     },
     /// Fetch the Docker CLI tools for Windows that contrd installs per user into target/windows-cli.
     WindowsCli,
+    /// Assemble the Windows core payload the client installer carries from Windows builds of contrd and contr,
+    /// target/guest and target/windows-cli.
+    DistWindows {
+        /// Directory holding contrd.exe and contr.exe built for Windows.
+        #[arg(long)]
+        binaries: PathBuf,
+        /// Directory that receives the payload.
+        #[arg(long, default_value = "target/dist")]
+        out: PathBuf,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -39,6 +50,7 @@ fn main() -> anyhow::Result<()> {
         }
         Task::Guest { arch } => guest::build(&root, &arch)?,
         Task::WindowsCli => windows_cli::build(&root)?,
+        Task::DistWindows { binaries, out } => dist::windows(&root, &binaries, &out)?,
     }
 
     Ok(())
