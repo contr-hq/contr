@@ -2,7 +2,8 @@ use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
-use contr_core::guest::{self, EngineConfig};
+use contr_core::guest;
+use contr_core::proxy::Proxy;
 use contr_engine_proxy::Rewrites;
 use contr_mux::{Channel, Opener, Role};
 use contr_transport::{Endpoint, Listener};
@@ -12,6 +13,7 @@ use tokio::process::{Child, ChildStdout};
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{Instant, sleep, timeout};
 
+use crate::engine_config::Configuration;
 use crate::integration::{Integrations, Running};
 use crate::output::{forward_log, wait_for_line};
 use crate::{host_tcp, ping, wsl};
@@ -36,18 +38,19 @@ pub(crate) struct Session {
 }
 
 impl Session {
-    /// Configures the engine with `config`, anchors the data distribution, starts the agent in the runtime
+    /// Configures the engine with `configuration`, anchors the data distribution, starts the agent in the runtime
     /// distribution, serves `engine_pipe` and each of `shared_pipes` no other program owns, and returns once the
     /// engine answers a ping; the requested `integrations` then run until the session stops.
     pub(crate) async fn start(
         runtime: &str,
         data: &str,
-        config: &EngineConfig,
+        configuration: &Configuration,
         engine_pipe: &str,
         shared_pipes: &[String],
         integrations: &Integrations,
     ) -> io::Result<Self> {
-        wsl::configure(runtime, config, wsl::Configure::Apply).await?;
+        wsl::configure(runtime, &configuration.engine, wsl::Configure::Apply).await?;
+        let rewrites = Arc::new(pipe_rewrites(configuration.container_proxy.clone()));
         let mut background = Vec::new();
 
         let mut anchor = wsl::spawn(data, &[guest::AGENT_PATH, "data-anchor"])?;
@@ -68,13 +71,13 @@ impl Session {
 
         let listener = Listener::bind_messages(&Endpoint::NamedPipe(engine_pipe.to_owned()))
             .map_err(|error| io::Error::other(format!("cannot serve {engine_pipe}: {error}")))?;
-        let mut relays = vec![relay(listener, opener.clone())];
+        let mut relays = vec![relay(listener, opener.clone(), Arc::clone(&rewrites))];
         let mut served = Vec::new();
         for pipe in shared_pipes {
             match Listener::bind_messages(&Endpoint::NamedPipe(pipe.clone())) {
                 Ok(listener) => {
                     tracing::info!(%pipe, "serving the engine");
-                    relays.push(relay(listener, opener.clone()));
+                    relays.push(relay(listener, opener.clone(), Arc::clone(&rewrites)));
                     served.push(pipe.clone());
                 }
                 Err(error) => tracing::info!(%error, %pipe, "another program serves this pipe"),
@@ -94,7 +97,7 @@ impl Session {
             session.stop().await;
             return Err(error);
         }
-        session.integrations = Some(integrations.run(runtime));
+        session.integrations = Some(integrations.run(runtime, configuration.container_proxy.clone()));
 
         Ok(session)
     }
@@ -162,13 +165,17 @@ impl Session {
     }
 }
 
-fn relay(listener: Listener, opener: Opener) -> JoinHandle<()> {
-    let rewrites = Arc::new(Rewrites {
+/// How the engine proxy adjusts requests from Windows clients.
+fn pipe_rewrites(container_proxy: Option<Proxy>) -> Rewrites {
+    Rewrites {
         drives_root: guest::WINDOWS_DRIVES.to_owned(),
         distro_root: None,
         host_alias: true,
-        proxy: None,
-    });
+        proxy: container_proxy,
+    }
+}
+
+fn relay(listener: Listener, opener: Opener, rewrites: Arc<Rewrites>) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut incoming = listener.incoming();
         let mut connections = JoinSet::new();

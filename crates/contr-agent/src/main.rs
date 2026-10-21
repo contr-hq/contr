@@ -49,7 +49,8 @@ enum Command {
     },
     /// Mount the data guest's storage for the runtime guest and hold it until standard input closes.
     DataAnchor,
-    /// Serve the engine to the WSL distribution this process runs in until standard input closes.
+    /// Serve the engine to the WSL distribution this process runs in until standard input closes. The first line of
+    /// standard input configures the integration.
     Integrate {
         /// Name of this distribution, as `wsl.exe` lists it.
         #[arg(long)]

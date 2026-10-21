@@ -1,7 +1,9 @@
 //! Proxy servers in the form the engine and most tools take them: `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`.
 
+use serde::{Deserialize, Serialize};
+
 /// Where outgoing connections go; a destination scheme without a server connects directly.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Proxy {
     /// Proxy URL for `http://` destinations.
     pub http: Option<String>,

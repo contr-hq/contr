@@ -155,12 +155,12 @@ impl Backend for WslBackend {
 
         report(progress, "Configuring the engine");
         let settings = self.engine.lock().map(|settings| settings.clone()).unwrap_or_default();
-        let config = engine_config::resolve(&settings).await;
+        let configuration = engine_config::resolve(&settings).await;
         report(progress, "Starting the engine");
         let session = Session::start(
             product::WSL_RUNTIME_DISTRO,
             product::WSL_DATA_DISTRO,
-            &config,
+            &configuration,
             &self.engine_pipe,
             &self.shared_pipes(),
             &self.integrations,
