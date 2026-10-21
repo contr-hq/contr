@@ -109,15 +109,24 @@ impl Engine {
         };
         let mut session = self.exec(&start).await?;
 
+        // Stdin closes whatever happens to the input, so the command ends and the output stream with it.
         let feed = async {
             let closed = |error: std::io::Error| EngineError::Engine(format!("cannot write to the command: {error}"));
+            let mut fed = Ok(());
             if let Some(mut stdin) = stdin {
                 while let Some(chunk) = stdin.next().await {
-                    session.input.write_all(&chunk?).await.map_err(closed)?;
+                    let written = match chunk {
+                        Ok(chunk) => session.input.write_all(&chunk).await.map_err(closed),
+                        Err(error) => Err(error),
+                    };
+                    if written.is_err() {
+                        fed = written;
+                        break;
+                    }
                 }
             }
-            session.input.shutdown().await.map_err(closed)?;
-            Ok::<(), EngineError>(())
+            let shut = session.input.shutdown().await.map_err(closed);
+            fed.and(shut)
         };
         let collect = async {
             let mut output = RunOutput::default();
