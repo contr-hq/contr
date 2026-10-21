@@ -29,6 +29,7 @@ contr-sdkgen = { path = "crates/contr-sdkgen" }
 contr-settings = { path = "crates/contr-settings" }
 contr-testkit = { path = "crates/contr-testkit" }
 contr-transport = { path = "crates/contr-transport" }
+contr-updater = { path = "crates/contr-updater" }
 
 anyhow = "1.0.104"
 async-stream = "0.3.6"
@@ -50,7 +51,10 @@ prost = "0.14.4"
 prost-types = "0.14.4"
 protox = "0.10.0"
 regex = "1.13.1"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23.46", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 sd-notify = "0.5.0"
+semver = "1.0.28"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"

@@ -1,12 +1,24 @@
 [package]
 name = "contr-updater"
-description = "Update checks and guest runtime migration."
+description = "Checks the published releases for a newer Contr."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
+
+[dependencies]
+contr-core.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+semver.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt"] }
 
 [lints]
 workspace = true
