@@ -4,6 +4,7 @@ pub mod certificates;
 pub mod cli_tools;
 pub mod disk;
 pub mod docker_context;
+pub mod docker_credentials;
 #[cfg(windows)]
 pub mod elevation;
 pub mod policy;
