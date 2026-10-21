@@ -108,7 +108,7 @@ jobs:
         with:
           tool: cargo-about@0.9.2
       - run: >-
-          cargo about generate --config packaging/licenses/about.toml
+          mkdir -p target/notices && cargo about generate --config packaging/licenses/about.toml
           --output-file target/notices/rust-crates.txt packaging/licenses/about.hbs
       - run: cargo xtask dist-windows --binaries target/windows-binaries
       - run: chmod +x target/linux-binaries/* && cargo xtask dist-linux --binaries target/linux-binaries
