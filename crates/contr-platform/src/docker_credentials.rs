@@ -119,7 +119,11 @@ fn from_helper(helper: &str, server: &str, helper_dirs: &[PathBuf]) -> io::Resul
         .spawn()
         .map_err(|error| io::Error::new(error.kind(), format!("cannot run {}: {error}", program.display())))?;
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(server.as_bytes())?;
+        // A helper may exit without reading the server; its exit status still says whether it holds credentials.
+        match stdin.write_all(server.as_bytes()) {
+            Err(error) if error.kind() != io::ErrorKind::BrokenPipe => return Err(error),
+            _ => {}
+        }
     }
     let output = child.wait_with_output()?;
     // Helpers exit non-zero, saying "credentials not found", for a server they hold nothing for.
