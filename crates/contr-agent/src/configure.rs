@@ -1,9 +1,10 @@
+use std::fmt;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Context, ensure};
+use anyhow::Context;
 use contr_core::guest::EngineConfig;
 
 use crate::engine::DOCKERD;
@@ -24,12 +25,41 @@ pub(crate) fn certificates_dir() -> PathBuf {
     Path::new(CONFIG_DIR).join(CERTS_DIR)
 }
 
-/// Writes the [`EngineConfig`] on standard input for the engine's next start, once `dockerd` accepts it.
-pub(crate) fn configure() -> anyhow::Result<()> {
+/// `dockerd` refused a configuration file, for the reason it gave.
+#[derive(Debug)]
+pub(crate) struct Rejected(String);
+
+impl fmt::Display for Rejected {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "the engine rejects its configuration: {}", self.0)
+    }
+}
+
+impl std::error::Error for Rejected {}
+
+/// Writes the [`EngineConfig`] on standard input for the engine's next start once `dockerd` accepts it; with `check`,
+/// only asks `dockerd`.
+pub(crate) fn configure(check: bool) -> anyhow::Result<()> {
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
     let config: EngineConfig = serde_json::from_str(&input).context("standard input holds no engine configuration")?;
-    write(Path::new(CONFIG_DIR), &config, validate)
+    let dir = Path::new(CONFIG_DIR);
+    if check {
+        self::check(dir, &config, validate)
+    } else {
+        write(dir, &config, validate)
+    }
+}
+
+fn check(dir: &Path, config: &EngineConfig, validate: impl Fn(&Path) -> anyhow::Result<()>) -> anyhow::Result<()> {
+    fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
+    let staged = dir.join("daemon.json.check");
+    fs::write(&staged, serde_json::to_vec_pretty(&config.daemon)?)
+        .with_context(|| format!("cannot write {}", staged.display()))?;
+    let checked = validate(&staged);
+    let _ = fs::remove_file(&staged);
+
+    checked
 }
 
 fn write(dir: &Path, config: &EngineConfig, validate: impl Fn(&Path) -> anyhow::Result<()>) -> anyhow::Result<()> {
@@ -68,11 +98,9 @@ fn validate(path: &Path) -> anyhow::Result<()> {
         .arg(path)
         .output()
         .context("cannot run dockerd")?;
-    ensure!(
-        output.status.success(),
-        "the engine rejects its configuration: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
-    );
+    if !output.status.success() {
+        return Err(Rejected(String::from_utf8_lossy(&output.stderr).trim().to_owned()).into());
+    }
 
     Ok(())
 }
@@ -109,6 +137,20 @@ mod tests {
         write(dir.path(), &config(&json!({}), ""), accepted).unwrap();
         assert!(!dir.path().join("certs/host.pem").exists());
         assert!(dir.path().join("certs").is_dir());
+    }
+
+    #[test]
+    fn a_check_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let error = check(dir.path(), &config(&json!({"nope": 1}), "PEM"), |_| {
+            Err(Rejected("unknown key".to_owned()).into())
+        })
+        .unwrap_err();
+
+        assert!(error.is::<Rejected>());
+        assert_eq!(error.to_string(), "the engine rejects its configuration: unknown key");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 
     #[test]
