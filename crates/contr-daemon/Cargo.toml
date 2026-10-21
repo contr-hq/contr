@@ -38,9 +38,11 @@ contr-settings.workspace = true
 serde_json.workspace = true
 contr-testkit = { workspace = true, optional = true }
 contr-transport.workspace = true
+contr-updater.workspace = true
 futures-util.workspace = true
 prost.workspace = true
 prost-types.workspace = true
+semver.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream.workspace = true

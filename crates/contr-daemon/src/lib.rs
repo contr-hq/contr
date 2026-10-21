@@ -6,6 +6,7 @@ mod services;
 mod settings;
 mod slot;
 mod status;
+mod updates;
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -23,6 +24,7 @@ use contr_api::integration::v1::integration_service_server::IntegrationServiceSe
 use contr_api::kubernetes::v1::kubernetes_service_server::KubernetesServiceServer;
 use contr_api::networks::v1::networks_service_server::NetworksServiceServer;
 use contr_api::settings::v1::settings_service_server::SettingsServiceServer;
+use contr_api::updates::v1::updates_service_server::UpdatesServiceServer;
 use contr_api::volumes::v1::volumes_service_server::VolumesServiceServer;
 use contr_backend::{Backend, BackendKind, EngineConnector, EngineHealth, EngineSupervisor, SupervisorConfig};
 use contr_core::{paths, product};
@@ -33,10 +35,11 @@ use tonic::transport::Server;
 use crate::kubernetes::KubernetesHub;
 use crate::services::{
     CliLocations, ComposeApi, ContainersApi, DaemonApi, DiagnosticsApi, EngineApi, ImagesApi, IntegrationApi,
-    KubernetesApi, NetworksApi, SettingsApi, Shared, VolumesApi, WslAccess,
+    KubernetesApi, NetworksApi, SettingsApi, Shared, UpdatesApi, VolumesApi, WslAccess,
 };
 use crate::settings::SettingsHub;
 use crate::slot::{DockerContext, EngineSlot};
+use crate::updates::UpdatesHub;
 
 /// Backend the daemon runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,6 +82,8 @@ pub struct Config {
     pub kubeconfig: Option<PathBuf>,
     /// The daemon's recent log, which diagnostics bundles carry.
     pub log: Option<LogRing>,
+    /// GitHub releases endpoint to check for updates instead of the core's own.
+    pub update_feed: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -127,6 +132,13 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
         &settings,
         config.kubeconfig.clone().or_else(contr_kube::kubeconfig::default_path),
     );
+    let updates = UpdatesHub::spawn(
+        Arc::clone(&settings),
+        config
+            .update_feed
+            .clone()
+            .unwrap_or_else(|| product::RELEASES_API.to_owned()),
+    );
     let shared = Arc::new(Shared {
         supervisor,
         slot,
@@ -139,6 +151,7 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
         settings,
         docker_context: context,
         kubernetes,
+        updates,
         log: config.log.clone(),
     });
 
@@ -171,6 +184,7 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
             config.compose.clone(),
         )))
         .add_service(KubernetesServiceServer::new(KubernetesApi(Arc::clone(&shared))))
+        .add_service(UpdatesServiceServer::new(UpdatesApi(Arc::clone(&shared))))
         .add_service(NetworksServiceServer::new(NetworksApi(shared)))
         .serve_with_incoming_shutdown(listener.incoming(), shutdown)
         .await;

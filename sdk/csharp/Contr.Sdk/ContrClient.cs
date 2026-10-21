@@ -10,6 +10,7 @@ using Contr.Sdk.Integration.V1;
 using Contr.Sdk.Kubernetes.V1;
 using Contr.Sdk.Networks.V1;
 using Contr.Sdk.Settings.V1;
+using Contr.Sdk.Updates.V1;
 using Contr.Sdk.Volumes.V1;
 using Grpc.Core;
 using Grpc.Net.Client;
@@ -40,6 +41,7 @@ public sealed class ContrClient : IDisposable
         Integration = new IntegrationService.IntegrationServiceClient(channel);
         Diagnostics = new DiagnosticsService.DiagnosticsServiceClient(channel);
         Settings = new SettingsService.SettingsServiceClient(channel);
+        Updates = new UpdatesService.UpdatesServiceClient(channel);
     }
 
     /// <summary>Value of <c>proto/API_REVISION</c> this SDK was generated from.</summary>
@@ -83,6 +85,9 @@ public sealed class ContrClient : IDisposable
 
     /// <summary>The user's settings and the ones an administrator fixes.</summary>
     public SettingsService.SettingsServiceClient Settings { get; }
+
+    /// <summary>Whether a newer Contr is published.</summary>
+    public UpdatesService.UpdatesServiceClient Updates { get; }
 
     /// <summary>Connects to <paramref name="endpoint"/>, or to <see cref="ContrEndpoint.Resolve"/>, and performs the handshake.</summary>
     public static async Task<ContrClient> ConnectAsync(

@@ -29,8 +29,9 @@ use contr_sdk::api::networks::v1::{
 };
 use contr_sdk::api::settings::v1::{
     EngineSettings, GetSettingsRequest, ProxyMode, ProxySettings, RegistrySettings, ResetSettingsRequest, Settings,
-    UpdateSettingsRequest,
+    UpdateSettingsRequest, UpdatesSettings,
 };
+use contr_sdk::api::updates::v1::{CheckForUpdatesRequest, GetUpdateStatusRequest};
 use contr_sdk::{Client, ClientIdentity, Endpoint, Error};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -52,6 +53,11 @@ impl Daemon {
 
     /// Daemon whose settings and administrator's settings are `settings.json` and `admin-settings.json` in `dir`.
     fn start_in(dir: tempfile::TempDir) -> Self {
+        Self::start_with_feed(dir, None)
+    }
+
+    /// Daemon that checks `update_feed` for updates.
+    fn start_with_feed(dir: tempfile::TempDir, update_feed: Option<String>) -> Self {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let instance = NEXT.fetch_add(1, Ordering::Relaxed);
 
@@ -77,6 +83,7 @@ impl Daemon {
             compose: None,
             kubeconfig: Some(dir.path().join("kubeconfig")),
             log: Some(log.clone()),
+            update_feed,
         };
         let (shutdown, signal) = oneshot::channel();
         let task = tokio::spawn(contr_daemon::run(config, async {
@@ -675,6 +682,124 @@ async fn containers_join_and_leave_networks() {
     assert!(matches!(Error::from(unknown), Error::NotFound(_)));
 
     drop(watch);
+    daemon.stop().await;
+}
+
+/// Serves the GitHub releases list `releases` to every request.
+async fn release_feed(releases: &'static str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let mut request = vec![0; 4096];
+            let _ = stream.read(&mut request).await;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{releases}",
+                releases.len()
+            );
+            let _ = stream.write_all(response.as_bytes()).await;
+        }
+    });
+    format!("http://{address}/releases")
+}
+
+#[tokio::test]
+async fn updates_are_checked_while_the_settings_allow() {
+    let feed = release_feed(
+        r#"[{"tag_name": "v99.0.0", "html_url": "https://example/99", "published_at": "2026-12-01T00:00:00Z", "body": "Notes"}]"#,
+    )
+    .await;
+    let daemon = Daemon::start_with_feed(tempfile::tempdir().unwrap(), Some(feed));
+    let client = daemon.client().await;
+
+    let before = client
+        .updates()
+        .get_update_status(GetUpdateStatusRequest {})
+        .await
+        .unwrap()
+        .into_inner()
+        .status
+        .unwrap();
+    assert_eq!(before.current_version, contr_core::product::VERSION);
+    assert!(before.available.is_none() && before.checked_at.is_none());
+
+    let checked = client
+        .updates()
+        .check_for_updates(CheckForUpdatesRequest {})
+        .await
+        .unwrap()
+        .into_inner()
+        .status
+        .unwrap();
+    assert_eq!(checked.error, "");
+    assert!(checked.checked_at.is_some());
+    let available = checked.available.unwrap();
+    assert_eq!(
+        (
+            available.version.as_str(),
+            available.url.as_str(),
+            available.notes.as_str()
+        ),
+        ("99.0.0", "https://example/99", "Notes")
+    );
+    assert_eq!(available.published_at.unwrap().seconds, 1_796_083_200);
+    let kept = client
+        .updates()
+        .get_update_status(GetUpdateStatusRequest {})
+        .await
+        .unwrap()
+        .into_inner()
+        .status
+        .unwrap();
+    assert_eq!(kept.available.unwrap().version, "99.0.0");
+
+    let off = Settings {
+        updates: Some(UpdatesSettings {
+            check: false,
+            prereleases: false,
+        }),
+        ..Default::default()
+    };
+    client
+        .settings()
+        .update_settings(masked(off, &["updates.check"]))
+        .await
+        .unwrap();
+    let refused = client
+        .updates()
+        .check_for_updates(CheckForUpdatesRequest {})
+        .await
+        .unwrap_err();
+    assert!(matches!(Error::from(refused), Error::Conflict(_)));
+
+    daemon.stop().await;
+}
+
+#[tokio::test]
+async fn a_failed_update_check_says_why() {
+    let unreachable = Some("http://127.0.0.1:1/releases".to_owned());
+    let daemon = Daemon::start_with_feed(tempfile::tempdir().unwrap(), unreachable);
+    let client = daemon.client().await;
+
+    let status = client
+        .updates()
+        .check_for_updates(CheckForUpdatesRequest {})
+        .await
+        .unwrap()
+        .into_inner()
+        .status
+        .unwrap();
+
+    assert!(status.available.is_none());
+    assert!(status.checked_at.is_some());
+    assert!(
+        status.error.starts_with("cannot read the published releases: "),
+        "{}",
+        status.error
+    );
+
     daemon.stop().await;
 }
 

@@ -55,6 +55,11 @@ pub mod contr {
             include!("contr.settings.v1.rs");
         }
     }
+    pub mod updates {
+        pub mod v1 {
+            include!("contr.updates.v1.rs");
+        }
+    }
     pub mod volumes {
         pub mod v1 {
             include!("contr.volumes.v1.rs");

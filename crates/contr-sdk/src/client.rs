@@ -15,6 +15,7 @@ use contr_api::integration::v1::integration_service_client::IntegrationServiceCl
 use contr_api::kubernetes::v1::kubernetes_service_client::KubernetesServiceClient;
 use contr_api::networks::v1::networks_service_client::NetworksServiceClient;
 use contr_api::settings::v1::settings_service_client::SettingsServiceClient;
+use contr_api::updates::v1::updates_service_client::UpdatesServiceClient;
 use contr_api::volumes::v1::volumes_service_client::VolumesServiceClient;
 use contr_core::product;
 use contr_transport::Endpoint;
@@ -148,6 +149,11 @@ impl Client {
     /// Kubernetes cluster service.
     pub fn kubernetes(&self) -> KubernetesServiceClient<Channel> {
         KubernetesServiceClient::new(self.channel.clone())
+    }
+
+    /// Update check service.
+    pub fn updates(&self) -> UpdatesServiceClient<Channel> {
+        UpdatesServiceClient::new(self.channel.clone())
     }
 
     /// Daemon and engine description.

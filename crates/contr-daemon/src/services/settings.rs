@@ -183,6 +183,10 @@ fn settings(configured: &Configured) -> proto::Settings {
             version: configured.kubernetes.version.clone(),
             traefik: configured.kubernetes.traefik,
         }),
+        updates: Some(proto::UpdatesSettings {
+            check: configured.updates.check,
+            prereleases: configured.updates.prereleases,
+        }),
     }
 }
 
@@ -191,6 +195,7 @@ fn value(settings: &proto::Settings, path: &str) -> Result<Value, Status> {
     let engine = settings.engine.clone().unwrap_or_default();
     let proxy = settings.proxy.clone().unwrap_or_default();
     let kubernetes = settings.kubernetes.clone().unwrap_or_default();
+    let updates = settings.updates.unwrap_or_default();
     Ok(match path {
         "engine.start_with_daemon" => json!(engine.start_with_daemon),
         "engine.serve_default_pipe" => json!(engine.serve_default_pipe),
@@ -210,6 +215,8 @@ fn value(settings: &proto::Settings, path: &str) -> Result<Value, Status> {
         "kubernetes.enabled" => json!(kubernetes.enabled),
         "kubernetes.version" => json!(kubernetes.version),
         "kubernetes.traefik" => json!(kubernetes.traefik),
+        "updates.check" => json!(updates.check),
+        "updates.prereleases" => json!(updates.prereleases),
         _ => return Err(Status::invalid_argument(format!("{path} is not a setting"))),
     })
 }

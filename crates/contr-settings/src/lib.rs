@@ -21,6 +21,7 @@ pub struct Configured {
     pub certificates: Certificates,
     pub registry: Registry,
     pub kubernetes: Kubernetes,
+    pub updates: Updates,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -136,8 +137,27 @@ impl Kubernetes {
     }
 }
 
+/// Checks for newer Contr releases.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Updates {
+    /// Checks the published releases once a day and when asked.
+    pub check: bool,
+    /// Prereleases count as updates.
+    pub prereleases: bool,
+}
+
+impl Default for Updates {
+    fn default() -> Self {
+        Self {
+            check: true,
+            prereleases: false,
+        }
+    }
+}
+
 /// Every path a user may change and an administrator may fix.
-pub const PATHS: [&str; 13] = [
+pub const PATHS: [&str; 15] = [
     "engine.start_with_daemon",
     "engine.serve_default_pipe",
     "engine.daemon_json",
@@ -151,6 +171,8 @@ pub const PATHS: [&str; 13] = [
     "kubernetes.enabled",
     "kubernetes.version",
     "kubernetes.traefik",
+    "updates.check",
+    "updates.prereleases",
 ];
 
 /// URL schemes of a proxy server the engine connects through.
