@@ -768,7 +768,7 @@ fn push_image(engine: &Engine, name: &str, query: &HashMap<String, String>) -> R
 /// the container's `NetworkSettings` as the engine reports them.
 fn change_endpoint(engine: &Engine, reference: &str, action: &str, body: &Value) -> Response<Body> {
     let container = body["Container"].as_str().unwrap_or_default();
-    let network_id = {
+    let (network_id, container_id) = {
         let mut store = engine.store();
         let Some(network) = store
             .networks
@@ -818,9 +818,9 @@ fn change_endpoint(engine: &Engine, reference: &str, action: &str, body: &Value)
                 endpoints.remove(&id);
             }
         }
-        network_id
+        (network_id, id)
     };
-    engine.emit("network", action, &network_id, &json!({ "container": container }));
+    engine.emit("network", action, &network_id, &json!({ "container": container_id }));
 
     empty(StatusCode::OK)
 }
