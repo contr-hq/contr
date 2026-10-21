@@ -73,7 +73,7 @@ impl SettingsService for SettingsApi {
                 .backend
                 .check_daemon_config(daemon)
                 .await
-                .map_err(|reason| Status::invalid_argument(format!("engine.daemon_json: {reason}")))?;
+                .map_err(|rejection| status::daemon_json_rejected(&rejection))?;
         }
         let expected = Some(request.etag)
             .filter(|etag| !etag.is_empty())

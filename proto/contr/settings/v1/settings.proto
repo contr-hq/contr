@@ -35,7 +35,7 @@ message EngineSettings {
   bool serve_default_pipe = 2;
   // The engine's daemon.json as a JSON object; "{}" holds no settings. Contr sets hosts, data-root, host-gateway-ip,
   // host-gateway-ips, proxies and registry-mirrors itself, so UpdateSettings refuses them, and also refuses what the
-  // engine rejects when it can ask the engine. Applies only where DaemonService.GetInfo reports
+  // engine rejects when it can ask the engine, with a DaemonJsonRejection detail. Applies only where DaemonService.GetInfo reports
   // CAPABILITY_ENGINE_CONFIGURATION, from the next engine start.
   string daemon_json = 3;
 }
@@ -77,6 +77,19 @@ message CertificateSettings {
 message RegistrySettings {
   // Docker Hub mirrors the engine tries before Docker Hub, as http:// or https:// URLs.
   repeated string mirrors = 1;
+}
+
+// Detail of the INVALID_ARGUMENT status UpdateSettings returns when the engine rejects engine.daemon_json.
+message DaemonJsonRejection {
+  // Top-level keys the engine does not know, sorted.
+  repeated UnknownDaemonKey unknown_keys = 1;
+}
+
+// A top-level daemon.json key the engine does not know.
+message UnknownDaemonKey {
+  string key = 1;
+  // A key the engine accepts with the same value, such as "log-opts" for "log-opt"; empty when no known key is close.
+  string suggestion = 2;
 }
 
 // Effective settings at one point in time.

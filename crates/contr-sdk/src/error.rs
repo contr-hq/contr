@@ -1,4 +1,5 @@
 use contr_api::common::v1::Remediation;
+use contr_api::settings::v1::DaemonJsonRejection;
 use contr_core::ErrorReason;
 use contr_transport::{Endpoint, TransportError};
 use prost::Message;
@@ -7,6 +8,7 @@ use tonic_types::pb;
 
 const ERROR_INFO_TYPE: &str = "type.googleapis.com/google.rpc.ErrorInfo";
 const REMEDIATION_TYPE: &str = "type.googleapis.com/contr.common.v1.Remediation";
+const DAEMON_JSON_REJECTION_TYPE: &str = "type.googleapis.com/contr.settings.v1.DaemonJsonRejection";
 
 /// Failure of an SDK call, classified from the gRPC status and its `google.rpc.ErrorInfo` reason.
 #[derive(Debug, thiserror::Error)]
@@ -75,6 +77,19 @@ pub enum Error {
 }
 
 impl Error {
+    /// The keys the engine does not know when it rejected `engine.daemon_json` in an `UpdateSettings` call.
+    pub fn daemon_json_rejection(&self) -> Option<DaemonJsonRejection> {
+        let Self::Rpc(status) = self else {
+            return None;
+        };
+        pb::Status::decode(status.details())
+            .ok()?
+            .details
+            .into_iter()
+            .find(|detail| detail.type_url == DAEMON_JSON_REJECTION_TYPE)
+            .and_then(|detail| DaemonJsonRejection::decode(detail.value.as_slice()).ok())
+    }
+
     pub(crate) fn connect(endpoint: &Endpoint, source: TransportError) -> Self {
         Self::Connect {
             endpoint: endpoint.to_string(),

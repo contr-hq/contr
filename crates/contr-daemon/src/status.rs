@@ -1,10 +1,13 @@
-//! Conversion of daemon failures into gRPC statuses carrying `google.rpc.ErrorInfo` and `Remediation` details.
+//! Conversion of daemon failures into gRPC statuses carrying `google.rpc.ErrorInfo`, `Remediation` and
+//! `DaemonJsonRejection` details.
 
 use std::collections::HashMap;
 
 use bytes::Bytes;
 use contr_api::common::v1 as common;
+use contr_api::settings::v1 as settings;
 use contr_backend::OperationError;
+use contr_core::guest::ConfigRejection;
 use contr_core::{ErrorReason, Remediation, product};
 use contr_engine::EngineError;
 use prost::Message;
@@ -14,6 +17,7 @@ use tonic_types::pb;
 
 const ERROR_INFO_TYPE: &str = "type.googleapis.com/google.rpc.ErrorInfo";
 const REMEDIATION_TYPE: &str = "type.googleapis.com/contr.common.v1.Remediation";
+const DAEMON_JSON_REJECTION_TYPE: &str = "type.googleapis.com/contr.settings.v1.DaemonJsonRejection";
 
 pub(crate) fn engine_not_running() -> Status {
     with_reason(
@@ -35,6 +39,34 @@ pub(crate) fn setting_locked(path: &str) -> Status {
         ErrorReason::SettingLocked,
         &[],
     )
+}
+
+/// Status for an `engine.daemon_json` the engine rejects, naming each key it does not know.
+pub(crate) fn daemon_json_rejected(rejection: &ConfigRejection) -> Status {
+    let message = format!(
+        "engine.daemon_json: the engine rejects its configuration: {}",
+        rejection.reason
+    );
+    let detail = settings::DaemonJsonRejection {
+        unknown_keys: rejection
+            .unknown_keys
+            .iter()
+            .map(|unknown| settings::UnknownDaemonKey {
+                key: unknown.key.clone(),
+                suggestion: unknown.suggestion.clone().unwrap_or_default(),
+            })
+            .collect(),
+    };
+    let status = pb::Status {
+        code: Code::InvalidArgument.into(),
+        message: message.clone(),
+        details: vec![Any {
+            type_url: DAEMON_JSON_REJECTION_TYPE.to_owned(),
+            value: detail.encode_to_vec(),
+        }],
+    };
+
+    Status::with_details(Code::InvalidArgument, message, Bytes::from(status.encode_to_vec()))
 }
 
 pub(crate) fn from_engine(error: EngineError) -> Status {
@@ -105,6 +137,24 @@ mod tests {
         for reason in ErrorReason::ALL {
             assert_ne!(proto_reason(reason), common::ErrorReason::Unspecified, "{reason}");
         }
+    }
+
+    #[test]
+    fn daemon_json_rejections_name_the_unknown_keys() {
+        let status = daemon_json_rejected(&ConfigRejection {
+            reason: "unknown keys".to_owned(),
+            unknown_keys: vec![contr_core::guest::UnknownKey {
+                key: "log-opt".to_owned(),
+                suggestion: Some("log-opts".to_owned()),
+            }],
+        });
+
+        let details = pb::Status::decode(status.details()).unwrap();
+        let rejection = settings::DaemonJsonRejection::decode(details.details[0].value.as_slice()).unwrap();
+
+        assert_eq!(status.code(), Code::InvalidArgument);
+        assert_eq!(details.details[0].type_url, DAEMON_JSON_REJECTION_TYPE);
+        assert_eq!(rejection.unknown_keys[0].suggestion, "log-opts");
     }
 
     #[test]

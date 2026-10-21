@@ -51,8 +51,27 @@ pub const INTEGRATION_READY: &str = "contr integration ready";
 /// and `data`.
 pub const MANIFEST_FILE: &str = "guest.json";
 
-/// Exit code of `contr-agent configure` when the engine rejects the configuration.
+/// Exit code of `contr-agent configure` when the engine rejects the configuration; standard output then holds a
+/// [`ConfigRejection`] as JSON.
 pub const CONFIG_REJECTED: u8 = 3;
+
+/// Why the engine rejects a configuration.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfigRejection {
+    /// The engine's reason.
+    pub reason: String,
+    /// Top-level `daemon.json` keys the engine does not know, sorted.
+    pub unknown_keys: Vec<UnknownKey>,
+}
+
+/// A top-level `daemon.json` key the engine does not know.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnknownKey {
+    /// The key as written.
+    pub key: String,
+    /// A key the engine accepts with the same value.
+    pub suggestion: Option<String>,
+}
 
 /// What the engine uses from its next start, which `contr-agent configure` reads as JSON on standard input.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
