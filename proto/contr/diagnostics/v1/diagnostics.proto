@@ -14,6 +14,9 @@ service DiagnosticsService {
   // Runs a remediation that a check, a blocker or an error offered. Fails with NOT_FOUND for an action this backend
   // does not offer and CANCELLED when the user dismisses its prompt; cancelling the call never stops the action.
   rpc RunRemediation(RunRemediationRequest) returns (stream RunRemediationResponse);
+  // Collects versions, settings, check results, the engine's state and recent logs into a zip for support, with
+  // credentials and the user's name, home directory and computer name replaced; takes a few seconds.
+  rpc CreateBundle(CreateBundleRequest) returns (stream CreateBundleResponse);
 }
 
 message RunChecksRequest {}
@@ -55,6 +58,16 @@ message RunRemediationResponse {
     contr.common.v1.Progress progress = 1;
     // Last message of the stream.
     RemediationOutcome outcome = 2;
+  }
+}
+
+message CreateBundleRequest {}
+
+message CreateBundleResponse {
+  oneof event {
+    contr.common.v1.Progress progress = 1;
+    // The next part of the zip, which is whole once the stream ends without an error.
+    bytes chunk = 2;
   }
 }
 

@@ -1,9 +1,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, reason = "test helpers")]
 
+use std::io::{Cursor, Read, Write};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use contr_daemon::{BackendChoice, Config};
+use contr_diagnostics::LogRing;
 use contr_sdk::api::compose::v1::{Action, ListProjectsRequest, RunActionRequest, WatchProjectsRequest};
 use contr_sdk::api::containers::v1::LogStream;
 use contr_sdk::api::containers::v1::watch_containers_response::Event;
@@ -13,7 +15,9 @@ use contr_sdk::api::containers::v1::{
     UnpauseContainerRequest, WatchContainerStatsRequest, WatchContainersRequest,
 };
 use contr_sdk::api::daemon::v1::{BackendKind, Capability};
-use contr_sdk::api::diagnostics::v1::{CheckStatus, RunChecksRequest, RunRemediationRequest};
+use contr_sdk::api::diagnostics::v1::{
+    CheckStatus, CreateBundleRequest, RunChecksRequest, RunRemediationRequest, create_bundle_response,
+};
 use contr_sdk::api::engine::v1::{
     EngineState, ResetRequest, ResetScope, StartRequest, StopRequest, StreamUsageRequest, reset_response,
     start_response, stop_response,
@@ -36,6 +40,7 @@ struct Daemon {
     shutdown: Option<oneshot::Sender<()>>,
     task: JoinHandle<Result<(), contr_daemon::DaemonError>>,
     dir: tempfile::TempDir,
+    log: LogRing,
 }
 
 impl Daemon {
@@ -55,6 +60,7 @@ impl Daemon {
         #[cfg(unix)]
         let _ = instance;
 
+        let log = LogRing::new(64 * 1024);
         let config = Config {
             backend: BackendChoice::Fake,
             listen: Some(endpoint.clone()),
@@ -68,6 +74,7 @@ impl Daemon {
             admin_settings: Some(dir.path().join("admin-settings.json")),
             compose: None,
             kubeconfig: Some(dir.path().join("kubeconfig")),
+            log: Some(log.clone()),
         };
         let (shutdown, signal) = oneshot::channel();
         let task = tokio::spawn(contr_daemon::run(config, async {
@@ -79,6 +86,7 @@ impl Daemon {
             shutdown: Some(shutdown),
             task,
             dir,
+            log,
         }
     }
 
@@ -439,6 +447,71 @@ async fn checks_follow_the_engine_and_unknown_fixes_are_refused() {
         .await
         .unwrap_err();
     assert!(matches!(Error::from(refused), Error::NotFound(_)));
+
+    daemon.stop().await;
+}
+
+#[tokio::test]
+async fn bundles_carry_the_daemon_and_engine_state_without_credentials() {
+    let mut daemon = Daemon::start();
+    let client = daemon.client().await;
+    let proxy = Settings {
+        proxy: Some(ProxySettings {
+            mode: ProxyMode::Manual.into(),
+            http: "http://svc:hunter2@proxy.corp:3128".to_owned(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    client
+        .settings()
+        .update_settings(masked(proxy, &["proxy.mode", "proxy.http"]))
+        .await
+        .unwrap();
+    start_engine(&client).await;
+    daemon
+        .log
+        .write_all(b"INFO pulling with Authorization: Bearer hunter2\n")
+        .unwrap();
+
+    let mut events = client
+        .diagnostics()
+        .create_bundle(CreateBundleRequest {})
+        .await
+        .unwrap()
+        .into_inner();
+    let (mut steps, mut zip) = (Vec::new(), Vec::new());
+    while let Some(event) = events.message().await.unwrap() {
+        match event.event.unwrap() {
+            create_bundle_response::Event::Progress(progress) => steps.push(progress.message),
+            create_bundle_response::Event::Chunk(chunk) => zip.extend(chunk),
+        }
+    }
+    let mut zip = zip::ZipArchive::new(Cursor::new(zip)).unwrap();
+    let mut files: Vec<String> = zip.file_names().map(|name| name.unwrap().into_owned()).collect();
+    files.sort();
+
+    assert_eq!(steps.first().map(String::as_str), Some("Running the checks"));
+    assert_eq!(
+        files,
+        [
+            "checks.json",
+            "contrd.json",
+            "engine/containers.json",
+            "engine/info.json",
+            "engine/version.json",
+            "kubernetes.json",
+            "logs/contrd.log",
+            "settings.json",
+        ]
+    );
+    let mut everything = String::new();
+    for index in 0..zip.len() {
+        zip.by_index(index).unwrap().read_to_string(&mut everything).unwrap();
+    }
+    assert!(everything.contains("http://<redacted>@proxy.corp:3128"));
+    assert!(everything.contains("Authorization: <redacted>"));
+    assert!(!everything.contains("hunter2"));
 
     daemon.stop().await;
 }

@@ -6,7 +6,13 @@ use std::path::PathBuf;
 use clap::{Parser, ValueEnum};
 use contr_core::product;
 use contr_daemon::{BackendChoice, Config};
-use tracing_subscriber::EnvFilter;
+use contr_diagnostics::LogRing;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, fmt};
+
+/// Bytes of recent log output the daemon keeps for diagnostics bundles.
+const LOG_RING_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Parser)]
 #[command(name = product::DAEMON_BINARY, version, about)]
@@ -75,10 +81,15 @@ impl Default for Backend {
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_env(product::LOG_ENV).unwrap_or_else(|_| EnvFilter::new("info")))
-        .with_ansi(std::io::stderr().is_terminal())
-        .with_writer(std::io::stderr)
+    let log = LogRing::new(LOG_RING_BYTES);
+    tracing_subscriber::registry()
+        .with(EnvFilter::try_from_env(product::LOG_ENV).unwrap_or_else(|_| EnvFilter::new("info")))
+        .with(
+            fmt::layer()
+                .with_ansi(std::io::stderr().is_terminal())
+                .with_writer(std::io::stderr),
+        )
+        .with(fmt::layer().with_ansi(false).with_writer(log.clone()))
         .init();
 
     let config = Config {
@@ -100,6 +111,7 @@ fn main() -> anyhow::Result<()> {
         docker_context: !args.no_docker_context,
         compose: args.compose,
         kubeconfig: args.kubeconfig,
+        log: Some(log),
     };
 
     tokio::runtime::Builder::new_multi_thread()

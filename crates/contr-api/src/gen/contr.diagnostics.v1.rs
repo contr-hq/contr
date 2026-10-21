@@ -45,6 +45,24 @@ pub mod run_remediation_response {
         Outcome(super::RemediationOutcome),
     }
 }
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CreateBundleRequest {}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateBundleResponse {
+    #[prost(oneof = "create_bundle_response::Event", tags = "1, 2")]
+    pub event: ::core::option::Option<create_bundle_response::Event>,
+}
+/// Nested message and enum types in `CreateBundleResponse`.
+pub mod create_bundle_response {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Event {
+        #[prost(message, tag = "1")]
+        Progress(super::super::super::common::v1::Progress),
+        /// The next part of the zip, which is whole once the stream ends without an error.
+        #[prost(bytes, tag = "2")]
+        Chunk(::prost::alloc::vec::Vec<u8>),
+    }
+}
 /// What the user must still do after a remediation succeeded.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RemediationOutcome {
@@ -236,6 +254,37 @@ pub mod diagnostics_service_client {
                 );
             self.inner.server_streaming(req, path, codec).await
         }
+        /// Collects versions, settings, check results, the engine's state and recent logs into a zip for support, with
+        /// credentials and the user's name, home directory and computer name replaced; takes a few seconds.
+        pub async fn create_bundle(
+            &mut self,
+            request: impl tonic::IntoRequest<super::CreateBundleRequest>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::CreateBundleResponse>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.diagnostics.v1.DiagnosticsService/CreateBundle",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "contr.diagnostics.v1.DiagnosticsService",
+                        "CreateBundle",
+                    ),
+                );
+            self.inner.server_streaming(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -273,6 +322,21 @@ pub mod diagnostics_service_server {
             request: tonic::Request<super::RunRemediationRequest>,
         ) -> std::result::Result<
             tonic::Response<Self::RunRemediationStream>,
+            tonic::Status,
+        >;
+        /// Server streaming response type for the CreateBundle method.
+        type CreateBundleStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::CreateBundleResponse, tonic::Status>,
+            >
+            + std::marker::Send
+            + 'static;
+        /// Collects versions, settings, check results, the engine's state and recent logs into a zip for support, with
+        /// credentials and the user's name, home directory and computer name replaced; takes a few seconds.
+        async fn create_bundle(
+            &self,
+            request: tonic::Request<super::CreateBundleRequest>,
+        ) -> std::result::Result<
+            tonic::Response<Self::CreateBundleStream>,
             tonic::Status,
         >;
     }
@@ -430,6 +494,53 @@ pub mod diagnostics_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = RunRemediationSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.server_streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.diagnostics.v1.DiagnosticsService/CreateBundle" => {
+                    #[allow(non_camel_case_types)]
+                    struct CreateBundleSvc<T: DiagnosticsService>(pub Arc<T>);
+                    impl<
+                        T: DiagnosticsService,
+                    > tonic::server::ServerStreamingService<super::CreateBundleRequest>
+                    for CreateBundleSvc<T> {
+                        type Response = super::CreateBundleResponse;
+                        type ResponseStream = T::CreateBundleStream;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::ResponseStream>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::CreateBundleRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as DiagnosticsService>::create_bundle(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = CreateBundleSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

@@ -5,6 +5,7 @@ use bollard::query_parameters::DataUsageOptions;
 use bollard::{API_DEFAULT_VERSION, Docker};
 use contr_api::daemon::v1::EngineInfo;
 use contr_backend::EngineConnector;
+use serde_json::Value;
 
 use crate::EngineError;
 
@@ -62,6 +63,16 @@ impl Engine {
 }
 
 impl Engine {
+    /// `docker version` and `docker info` as the engine reports them.
+    pub async fn system_report(&self) -> Result<(Value, Value), EngineError> {
+        let (version, info) = tokio::try_join!(self.docker.version(), self.docker.info())?;
+
+        Ok((
+            serde_json::to_value(version).unwrap_or_default(),
+            serde_json::to_value(info).unwrap_or_default(),
+        ))
+    }
+
     /// CPUs and memory bytes of the machine the engine runs on.
     pub async fn capacity(&self) -> Result<(u32, u64), EngineError> {
         let info = self.docker.info().await?;

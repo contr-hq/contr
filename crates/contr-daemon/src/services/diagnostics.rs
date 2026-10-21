@@ -4,10 +4,12 @@ use std::sync::Arc;
 use contr_api::common::v1 as common;
 use contr_api::diagnostics::v1 as proto;
 use contr_api::diagnostics::v1::diagnostics_service_server::DiagnosticsService;
-use contr_api::diagnostics::v1::run_remediation_response::Event;
+use contr_api::diagnostics::v1::{create_bundle_response, run_remediation_response::Event};
 use contr_backend::{Backend, BackendError, Check, CheckStatus, EngineState, Progress, ProgressSink};
 use contr_core::Remediation;
+use contr_diagnostics::{Bundle, BundleError, Identity, Redactor};
 use futures_util::StreamExt;
+use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
@@ -18,6 +20,8 @@ const GIB: u64 = 1024 * 1024 * 1024;
 const DISK_FAIL_BELOW: u64 = 2 * GIB;
 const DISK_WARN_BELOW: u64 = 10 * GIB;
 const EVENT_QUEUE: usize = 32;
+const BUNDLE_CHUNK: usize = 64 * 1024;
+const COMPOSE_PROJECT_LABEL: &str = "com.docker.compose.project";
 /// Check of the backends that serve the Docker CLI's default endpoint, which the `default` context reaches.
 const DEFAULT_PIPE_CHECK: &str = "default-pipe";
 const DEFAULT_CONTEXT: &str = "default";
@@ -27,21 +31,13 @@ pub(crate) struct DiagnosticsApi(pub(crate) Arc<Shared>);
 #[tonic::async_trait]
 impl DiagnosticsService for DiagnosticsApi {
     type RunRemediationStream = ResponseStream<proto::RunRemediationResponse>;
+    type CreateBundleStream = ResponseStream<proto::CreateBundleResponse>;
 
     async fn run_checks(
         &self,
         _: Request<proto::RunChecksRequest>,
     ) -> Result<Response<proto::RunChecksResponse>, Status> {
-        let shared = &self.0;
-        let mut checks = vec![prerequisites(shared.backend.as_ref()).await];
-        checks.extend(shared.backend.diagnose().await);
-        checks.push(engine_api(shared).await);
-        let pipe_served = checks
-            .iter()
-            .any(|check| check.id == DEFAULT_PIPE_CHECK && check.status == CheckStatus::Pass);
-        checks.extend(docker_context(shared, pipe_served));
-        checks.extend(cli_tools(shared).await);
-        checks.push(disk_space(shared).await);
+        let checks = run_all_checks(&self.0).await;
 
         Ok(Response::new(proto::RunChecksResponse {
             checks: checks.into_iter().map(check).collect(),
@@ -88,6 +84,161 @@ impl DiagnosticsService for DiagnosticsApi {
 
         Ok(Response::new(ReceiverStream::new(receiver).boxed()))
     }
+
+    async fn create_bundle(
+        &self,
+        _: Request<proto::CreateBundleRequest>,
+    ) -> Result<Response<Self::CreateBundleStream>, Status> {
+        let redactor = Redactor::new(&Identity::current()).map_err(|error| Status::internal(error.to_string()))?;
+        let (events, receiver) = mpsc::channel(EVENT_QUEUE);
+        let shared = Arc::clone(&self.0);
+        tokio::spawn(async move {
+            let step = |message: &str| {
+                let _ = events.try_send(Ok(proto::CreateBundleResponse {
+                    event: Some(create_bundle_response::Event::Progress(common::Progress {
+                        message: message.to_owned(),
+                        fraction: None,
+                    })),
+                }));
+            };
+            match write_bundle(&shared, redactor, step).await {
+                Ok(zip) => {
+                    for chunk in zip.chunks(BUNDLE_CHUNK) {
+                        let chunk = proto::CreateBundleResponse {
+                            event: Some(create_bundle_response::Event::Chunk(chunk.to_vec())),
+                        };
+                        if events.send(Ok(chunk)).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+                Err(error) => {
+                    let _ = events
+                        .send(Err(Status::internal(format!("cannot write the bundle: {error}"))))
+                        .await;
+                }
+            }
+        });
+
+        Ok(Response::new(ReceiverStream::new(receiver).boxed()))
+    }
+}
+
+async fn run_all_checks(shared: &Shared) -> Vec<Check> {
+    let mut checks = vec![prerequisites(shared.backend.as_ref()).await];
+    checks.extend(shared.backend.diagnose().await);
+    checks.push(engine_api(shared).await);
+    let pipe_served = checks
+        .iter()
+        .any(|check| check.id == DEFAULT_PIPE_CHECK && check.status == CheckStatus::Pass);
+    checks.extend(docker_context(shared, pipe_served));
+    checks.extend(cli_tools(shared).await);
+    checks.push(disk_space(shared).await);
+
+    checks
+}
+
+/// The bundle's zip; `step` hears each stage as it starts.
+async fn write_bundle(shared: &Shared, redactor: Redactor, step: impl Fn(&str)) -> Result<Vec<u8>, BundleError> {
+    let mut bundle = Bundle::new(redactor);
+    bundle.add_json(
+        "contrd.json",
+        json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "apiRevision": contr_api::API_REVISION,
+            "os": std::env::consts::OS,
+            "arch": std::env::consts::ARCH,
+            "backend": format!("{:?}", shared.backend_kind),
+            "capabilities": shared.capabilities.iter().map(|capability| format!("{capability:?}")).collect::<Vec<_>>(),
+            "engineState": format!("{:?}", shared.supervisor.status().state()),
+            "uptimeSeconds": shared.started_at.elapsed().map(|uptime| uptime.as_secs()).unwrap_or_default(),
+        }),
+    )?;
+
+    step("Running the checks");
+    let checks = run_all_checks(shared).await;
+    bundle.add_json("checks.json", checks.iter().map(check_json).collect())?;
+
+    step("Reading the settings");
+    let settings = shared.settings.snapshot();
+    bundle.add_json(
+        "settings.json",
+        json!({
+            "effective": serde_json::to_value(&settings.effective.configured).unwrap_or_default(),
+            "lockedByAdministrator": settings.effective.locked,
+            "composeProjects": serde_json::to_value(&settings.compose_projects).unwrap_or_default(),
+        }),
+    )?;
+
+    step("Asking the engine");
+    match shared.slot.get().await {
+        Ok(handle) => {
+            match handle.engine.system_report().await {
+                Ok((version, info)) => {
+                    bundle.add_json("engine/version.json", version)?;
+                    bundle.add_json("engine/info.json", info)?;
+                }
+                Err(error) => bundle.add_text("engine/error.txt", &error.to_string())?,
+            }
+            let containers = handle.cache.containers().iter().map(container_json).collect();
+            bundle.add_json("engine/containers.json", containers)?;
+        }
+        Err(status) => bundle.add_text("engine/error.txt", status.message())?,
+    }
+    bundle.add_json("kubernetes.json", cluster_json(&shared.kubernetes.cluster()))?;
+
+    step("Collecting the logs");
+    for file in shared.backend.diagnostic_files().await {
+        bundle.add_text(&format!("backend/{}", file.name), &file.text)?;
+    }
+    if let Some(log) = &shared.log {
+        bundle.add_text("logs/contrd.log", &log.contents())?;
+    }
+
+    bundle.finish()
+}
+
+fn check_json(check: &Check) -> Value {
+    json!({
+        "id": check.id,
+        "title": check.title,
+        "status": format!("{:?}", check.status),
+        "detail": check.detail,
+        "remediations": check.remediations.iter().map(|remediation| remediation.action_id).collect::<Vec<_>>(),
+    })
+}
+
+/// What a container is, without its command or environment, which may hold secrets.
+fn container_json(container: &contr_api::containers::v1::Container) -> Value {
+    json!({
+        "id": container.id.chars().take(12).collect::<String>(),
+        "names": container.names,
+        "image": container.image,
+        "state": format!("{:?}", container.state()),
+        "status": container.status,
+        "composeProject": container.labels.get(COMPOSE_PROJECT_LABEL),
+    })
+}
+
+fn cluster_json(cluster: &contr_api::kubernetes::v1::Cluster) -> Value {
+    json!({
+        "state": format!("{:?}", cluster.state()),
+        "version": cluster.version,
+        "apiServer": cluster.api_server,
+        "kubeconfig": cluster.kubeconfig,
+        "context": cluster.context,
+        "error": cluster.error,
+        "steps": cluster.steps.iter().map(|step| json!({
+            "kind": format!("{:?}", step.kind()),
+            "status": format!("{:?}", step.status()),
+            "detail": step.detail,
+        })).collect::<Vec<_>>(),
+        "systemPods": cluster.system_pods.iter().map(|pod| json!({
+            "name": pod.name,
+            "phase": pod.phase,
+            "ready": format!("{}/{}", pod.ready_containers, pod.containers),
+        })).collect::<Vec<_>>(),
+    })
 }
 
 struct ChannelSink(mpsc::Sender<Result<proto::RunRemediationResponse, Status>>);
