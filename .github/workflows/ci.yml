@@ -89,7 +89,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: shellcheck tools/windows-sandbox/sandbox
+      - run: shellcheck tools/windows-sandbox/sandbox guest/sources/fetch.sh
       - name: XML templates are well-formed
         run: python3 -c 'import sys, xml.etree.ElementTree as et; [et.parse(f) for f in sys.argv[1:]]' tools/windows-sandbox/*.xml.in
       - run: python3 -m py_compile tools/windows-sandbox/ppm2png.py

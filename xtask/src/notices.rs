@@ -112,9 +112,9 @@ fn guest_section(notices: &mut String, versions: &Versions, packages: &[Package]
          | Docker Buildx for Linux | {buildx} | Apache-2.0 | https://github.com/docker/buildx/tree/v{buildx} |\n\
          | Alpine Linux packages | {alpine} | see `licenses/guest-packages.txt` | \
          https://gitlab.alpinelinux.org/alpine/aports |\n\n\
-         Alpine builds each package from its directory in the aports repository on the branch of the release above, \
-         from the upstream sources that directory names; Alpine mirrors those sources at \
-         https://distfiles.alpinelinux.org/distfiles/.\n",
+         The release that publishes this archive also publishes `contr-guest-sources-<version>.tar.gz`: for each \
+         Alpine package listed in `licenses/guest-packages.txt`, the aports directory at the commit the package was \
+         built from and every source file it names, from which Alpine's abuild builds the package.\n",
         moby = versions.moby,
         compose = versions.compose,
         buildx = versions.buildx,
