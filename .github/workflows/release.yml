@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   linux-assets:
-    # The Linux binaries need the glibc of the runner they are built on.
+    # The Linux binaries need the glibc of the runner they are built on, which packaging/linux/nfpm.yaml depends on.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -33,7 +33,7 @@ jobs:
       - name: Pack the guest sources, keeping their links and modes
         run: tar -czf target/contr-guest-sources.tar.gz -C target/guest-sources contr-guest-sources
       - run: cargo xtask windows-cli
-      - run: cargo build --release --locked --package contr-daemon --package contr-cli
+      - run: cargo build --release --locked --package contr-daemon --package contr-cli --package contr-helper
       - uses: actions/upload-artifact@v7
         with:
           name: linux-assets
@@ -52,6 +52,7 @@ jobs:
           path: |
             target/release/contrd
             target/release/contr
+            target/release/contr-helper
           if-no-files-found: error
 
   windows-binaries:
@@ -112,6 +113,11 @@ jobs:
           --output-file target/notices/rust-crates.txt packaging/licenses/about.hbs
       - run: cargo xtask dist-windows --binaries target/windows-binaries
       - run: chmod +x target/linux-binaries/* && cargo xtask dist-linux --binaries target/linux-binaries
+      - name: Debian and RPM packages
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "xtask") | .version')
+          [[ "$GITHUB_REF" == refs/tags/v* ]] && version=${GITHUB_REF_NAME#v}
+          cargo xtask package-linux --version "$version"
       - name: Archive
         run: |
           label=$([[ "$GITHUB_REF" == refs/tags/v* ]] && echo "$GITHUB_REF_NAME" || git rev-parse --short=12 HEAD)
@@ -119,13 +125,20 @@ jobs:
           zip -qr "contr-core-windows-x64-$label.zip" contr-core-windows-x64
           tar -czf "contr-linux-x64-$label.tar.gz" contr-linux-x64
           mv contr-guest-sources.tar.gz "contr-guest-sources-$label.tar.gz"
-          sha256sum contr-core-windows-x64-*.zip contr-linux-x64-*.tar.gz contr-guest-sources-*.tar.gz > SHA256SUMS
+          # GitHub renames release assets whose names hold characters such as ~, which SHA256SUMS would then not match.
+          for package in contr-daemon*.deb contr-daemon*.rpm; do
+            if [[ "$package" == *'~'* ]]; then mv "$package" "${package//'~'/-}"; fi
+          done
+          sha256sum contr-core-windows-x64-*.zip contr-linux-x64-*.tar.gz contr-daemon_*.deb contr-daemon-*.rpm \
+            contr-guest-sources-*.tar.gz > SHA256SUMS
       - uses: actions/upload-artifact@v7
         with:
           name: release-assets
           path: |
             target/dist/contr-core-windows-x64-*.zip
             target/dist/contr-linux-x64-*.tar.gz
+            target/dist/contr-daemon_*.deb
+            target/dist/contr-daemon-*.rpm
             target/dist/contr-guest-sources-*.tar.gz
             target/dist/SHA256SUMS
           if-no-files-found: error
@@ -140,4 +153,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" --verify-tag --title "Contr ${GITHUB_REF_NAME#v}" \
             --notes-file "$notes" $prerelease \
             target/dist/contr-core-windows-x64-*.zip target/dist/contr-linux-x64-*.tar.gz \
+            target/dist/contr-daemon_*.deb target/dist/contr-daemon-*.rpm \
             target/dist/contr-guest-sources-*.tar.gz target/dist/SHA256SUMS

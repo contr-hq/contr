@@ -1,7 +1,7 @@
 //! Release archives. The Windows core payload, which the client's installer carries, holds the daemon and the CLI
 //! built for Windows, the WSL guest images and the Docker CLI tools, laid out the way `contrd` finds them next to
-//! itself, with a manifest that pins every file by SHA-256. The Linux archive holds the daemon and the CLI. Both carry
-//! their license notices.
+//! itself, with a manifest that pins every file by SHA-256. The Linux archive holds the daemon, the CLI and the
+//! privileged helper. Both carry their license notices.
 
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -18,7 +18,7 @@ use crate::notices::{self, Contents};
 /// Directory name of the payload inside `out`.
 const PAYLOAD: &str = "contr-core-windows-x64";
 /// Directory name of the Linux archive inside `out`.
-const LINUX: &str = "contr-linux-x64";
+pub(crate) const LINUX: &str = "contr-linux-x64";
 /// Manifest at the payload's root.
 const MANIFEST: &str = "core.json";
 /// Manifest of the Docker CLI tools, which packaging/windows/cli.Dockerfile writes.
@@ -73,7 +73,7 @@ pub(crate) fn windows(root: &Path, binaries: &Path, out: &Path) -> anyhow::Resul
 /// Assembles the Linux archive from the Linux executables in `binaries`.
 pub(crate) fn linux(root: &Path, binaries: &Path, out: &Path) -> anyhow::Result<()> {
     let archive = fresh_dir(&out.join(LINUX))?;
-    for binary in [product::DAEMON_BINARY, product::CLI_BINARY] {
+    for binary in [product::DAEMON_BINARY, product::CLI_BINARY, product::HELPER_BINARY] {
         copy(&binaries.join(binary), &archive.join(binary))?;
     }
     notices::write(
