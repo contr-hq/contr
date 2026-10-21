@@ -6,11 +6,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use async_trait::async_trait;
 use contr_backend::{
     Backend, BackendError, BackendKind, BackendSettings, Blocker, Capability, Check, CheckStatus, EngineConnector,
-    IntegrationState, Probe, Progress, ProgressSink, RemediationOutcome, ResetScope, WslDistribution, WslIntegration,
+    EngineSettings, IntegrationState, Probe, Progress, ProgressSink, RemediationOutcome, ResetScope, WslDistribution,
+    WslIntegration,
 };
 use contr_core::{ErrorReason, Remediation, paths, product};
 use tokio::sync::Mutex;
 
+use crate::engine_config;
 use crate::images::GuestImages;
 use crate::integration::Integrations;
 use crate::session::Session;
@@ -28,6 +30,7 @@ pub struct WslBackend {
     disks_dir: PathBuf,
     engine_pipe: String,
     default_pipe: AtomicBool,
+    engine: std::sync::Mutex<EngineSettings>,
     integrations: Integrations,
     session: Mutex<Option<Session>>,
 }
@@ -45,6 +48,7 @@ impl WslBackend {
             disks_dir,
             engine_pipe,
             default_pipe: AtomicBool::new(false),
+            engine: std::sync::Mutex::default(),
             integrations: Integrations::new(integrated),
             session: Mutex::new(None),
         })
@@ -71,7 +75,11 @@ impl Backend for WslBackend {
     }
 
     fn capabilities(&self) -> &'static [Capability] {
-        &[Capability::WslIntegration, Capability::Reset]
+        &[
+            Capability::WslIntegration,
+            Capability::Reset,
+            Capability::EngineConfiguration,
+        ]
     }
 
     async fn probe(&self) -> Result<Probe, BackendError> {
@@ -143,10 +151,14 @@ impl Backend for WslBackend {
             stale.stop().await;
         }
 
+        report(progress, "Configuring the engine");
+        let settings = self.engine.lock().map(|settings| settings.clone()).unwrap_or_default();
+        let config = engine_config::resolve(&settings).await;
         report(progress, "Starting the engine");
         let session = Session::start(
             product::WSL_RUNTIME_DISTRO,
             product::WSL_DATA_DISTRO,
+            &config,
             &self.engine_pipe,
             &self.shared_pipes(),
             &self.integrations,
@@ -170,6 +182,9 @@ impl Backend for WslBackend {
     fn apply_settings(&self, settings: BackendSettings) {
         self.default_pipe
             .store(settings.serve_default_endpoint, Ordering::Relaxed);
+        if let Ok(mut engine) = self.engine.lock() {
+            *engine = settings.engine;
+        }
     }
 
     fn remediations(&self) -> &'static [Remediation] {
