@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package contr.settings.v1;
+
+import "google/protobuf/field_mask.proto";
+
+option csharp_namespace = "Contr.Sdk.Settings.V1";
+
+// The daemon's settings for the calling user: defaults, overridden by the user's own values, overridden in turn by
+// values an administrator fixes.
+service SettingsService {
+  // Returns the effective settings and which of them an administrator fixes.
+  rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
+  // Streams the effective settings, starting with the current ones and again after every change.
+  rpc WatchSettings(WatchSettingsRequest) returns (stream WatchSettingsResponse);
+  // Changes the fields update_mask names; fails with FAILED_PRECONDITION and SETTING_LOCKED when an administrator
+  // fixes one of them, with ABORTED when etag is set and stale, and with INVALID_ARGUMENT for an unknown path.
+  rpc UpdateSettings(UpdateSettingsRequest) returns (UpdateSettingsResponse);
+  // Returns every setting the user changed to its default; settings an administrator fixes keep that value.
+  rpc ResetSettings(ResetSettingsRequest) returns (ResetSettingsResponse);
+}
+
+message Settings {
+  EngineSettings engine = 1;
+}
+
+message EngineSettings {
+  // Starts the engine whenever the daemon starts.
+  bool start_with_daemon = 1;
+  // Windows: also serves the engine on \\.\pipe\docker_engine when no other program does, so tools that ignore Docker
+  // contexts reach it. Takes effect at the next engine start.
+  bool serve_default_pipe = 2;
+}
+
+// Effective settings at one point in time.
+message SettingsState {
+  Settings settings = 1;
+  // Field paths an administrator fixes, such as "engine.start_with_daemon"; clients show them as read-only.
+  repeated string locked_paths = 2;
+  // Changes with every change to the settings; UpdateSettings compares it to detect a concurrent edit.
+  string etag = 3;
+}
+
+message GetSettingsRequest {}
+
+message GetSettingsResponse {
+  SettingsState state = 1;
+}
+
+message WatchSettingsRequest {}
+
+message WatchSettingsResponse {
+  SettingsState state = 1;
+}
+
+message UpdateSettingsRequest {
+  // Values for the paths update_mask names; other fields are ignored.
+  Settings settings = 1;
+  google.protobuf.FieldMask update_mask = 2;
+  // The etag the client last saw; empty skips the check.
+  string etag = 3;
+}
+
+message UpdateSettingsResponse {
+  SettingsState state = 1;
+  // Changed paths that take effect only at the next engine start while the engine runs.
+  repeated string restart_required = 2;
+}
+
+message ResetSettingsRequest {}
+
+message ResetSettingsResponse {
+  SettingsState state = 1;
+  repeated string restart_required = 2;
+}

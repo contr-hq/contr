@@ -40,6 +40,11 @@ pub mod contr {
             include!("contr.networks.v1.rs");
         }
     }
+    pub mod settings {
+        pub mod v1 {
+            include!("contr.settings.v1.rs");
+        }
+    }
     pub mod volumes {
         pub mod v1 {
             include!("contr.volumes.v1.rs");
