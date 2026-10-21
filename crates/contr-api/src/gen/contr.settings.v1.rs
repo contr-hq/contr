@@ -10,7 +10,7 @@ pub struct Settings {
     #[prost(message, optional, tag = "4")]
     pub registry: ::core::option::Option<RegistrySettings>,
 }
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct EngineSettings {
     /// Starts the engine whenever the daemon starts.
     #[prost(bool, tag = "1")]
@@ -19,6 +19,12 @@ pub struct EngineSettings {
     /// contexts reach it. Takes effect at the next engine start.
     #[prost(bool, tag = "2")]
     pub serve_default_pipe: bool,
+    /// The engine's daemon.json as a JSON object; "{}" holds no settings. Contr sets hosts, data-root, host-gateway-ip,
+    /// host-gateway-ips, proxies and registry-mirrors itself, so UpdateSettings refuses them, and also refuses what the
+    /// engine rejects when it can ask the engine. Applies only where DaemonService.GetInfo reports
+    /// CAPABILITY_ENGINE_CONFIGURATION, from the next engine start.
+    #[prost(string, tag = "3")]
+    pub daemon_json: ::prost::alloc::string::String,
 }
 /// How the engine reaches servers outside the machine, for pulls, pushes and builds. Applies only where
 /// DaemonService.GetInfo reports CAPABILITY_ENGINE_CONFIGURATION, from the next engine start.

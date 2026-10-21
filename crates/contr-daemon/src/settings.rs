@@ -70,6 +70,7 @@ impl SettingsHub {
                 },
                 trust_system_certificates: configured.certificates.trust_system,
                 registry_mirrors: configured.registry.mirrors.clone(),
+                daemon: configured.engine.daemon_json.clone(),
             },
         }
     }

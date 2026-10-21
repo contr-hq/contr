@@ -14,8 +14,9 @@ use crate::settings::Snapshot;
 use crate::status;
 
 /// Paths whose change applies at the next engine start.
-const ENGINE_RESTART_PATHS: [&str; 7] = [
+const ENGINE_RESTART_PATHS: [&str; 8] = [
     "engine.serve_default_pipe",
+    "engine.daemon_json",
     "proxy.mode",
     "proxy.http",
     "proxy.https",
@@ -66,6 +67,13 @@ impl SettingsService for SettingsApi {
         let locked = self.0.settings.snapshot().effective.locked;
         if let Some((path, _)) = values.iter().find(|(path, _)| locked.contains(path)) {
             return Err(status::setting_locked(path));
+        }
+        if let Some((_, Value::Object(daemon))) = values.iter().find(|(path, _)| *path == "engine.daemon_json") {
+            self.0
+                .backend
+                .check_daemon_config(daemon)
+                .await
+                .map_err(|reason| Status::invalid_argument(format!("engine.daemon_json: {reason}")))?;
         }
         let expected = Some(request.etag)
             .filter(|etag| !etag.is_empty())
@@ -149,6 +157,7 @@ fn settings(configured: &Configured) -> proto::Settings {
         engine: Some(proto::EngineSettings {
             start_with_daemon: configured.engine.start_with_daemon,
             serve_default_pipe: configured.engine.serve_default_pipe,
+            daemon_json: serde_json::to_string_pretty(&configured.engine.daemon_json).unwrap_or_default(),
         }),
         proxy: Some(proto::ProxySettings {
             mode: match proxy.mode {
@@ -172,11 +181,12 @@ fn settings(configured: &Configured) -> proto::Settings {
 
 /// The value `settings` holds at `path`, as the settings file stores it.
 fn value(settings: &proto::Settings, path: &str) -> Result<Value, Status> {
-    let engine = settings.engine.unwrap_or_default();
+    let engine = settings.engine.clone().unwrap_or_default();
     let proxy = settings.proxy.clone().unwrap_or_default();
     Ok(match path {
         "engine.start_with_daemon" => json!(engine.start_with_daemon),
         "engine.serve_default_pipe" => json!(engine.serve_default_pipe),
+        "engine.daemon_json" => daemon_json(&engine.daemon_json)?,
         "proxy.mode" => json!(match proxy.mode() {
             proto::ProxyMode::System => ProxyMode::System,
             proto::ProxyMode::Manual => ProxyMode::Manual,
@@ -190,4 +200,18 @@ fn value(settings: &proto::Settings, path: &str) -> Result<Value, Status> {
         "registry.mirrors" => json!(settings.registry.clone().unwrap_or_default().mirrors),
         _ => return Err(Status::invalid_argument(format!("{path} is not a setting"))),
     })
+}
+
+/// The object of a `daemon.json` text; blank text holds no settings.
+fn daemon_json(text: &str) -> Result<Value, Status> {
+    if text.trim().is_empty() {
+        return Ok(json!({}));
+    }
+    match serde_json::from_str(text) {
+        Ok(Value::Object(daemon)) => Ok(Value::Object(daemon)),
+        Ok(_) => Err(Status::invalid_argument("engine.daemon_json is not a JSON object")),
+        Err(error) => Err(Status::invalid_argument(format!(
+            "engine.daemon_json is not JSON: {error}"
+        ))),
+    }
 }

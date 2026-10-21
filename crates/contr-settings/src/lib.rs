@@ -27,6 +27,8 @@ pub struct Configured {
 pub struct Engine {
     pub start_with_daemon: bool,
     pub serve_default_pipe: bool,
+    /// The engine's `daemon.json`, without the keys of [`CONTR_DAEMON_KEYS`].
+    pub daemon_json: Map<String, Value>,
 }
 
 impl Default for Engine {
@@ -34,9 +36,23 @@ impl Default for Engine {
         Self {
             start_with_daemon: false,
             serve_default_pipe: true,
+            daemon_json: Map::new(),
         }
     }
 }
+
+/// `daemon.json` keys Contr sets itself, with what a user changes instead.
+pub const CONTR_DAEMON_KEYS: [(&str, &str); 6] = [
+    ("hosts", "Contr chooses where the engine listens"),
+    ("data-root", "Contr chooses where the engine keeps its data"),
+    ("host-gateway-ip", "Contr points host.docker.internal at the host"),
+    ("host-gateway-ips", "Contr points host.docker.internal at the host"),
+    (
+        "proxies",
+        "set proxy.mode, proxy.http, proxy.https and proxy.exclude instead",
+    ),
+    ("registry-mirrors", "set registry.mirrors instead"),
+];
 
 /// How the engine reaches servers outside the machine.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,9 +113,10 @@ pub struct Registry {
 }
 
 /// Every path a user may change and an administrator may fix.
-pub const PATHS: [&str; 8] = [
+pub const PATHS: [&str; 9] = [
     "engine.start_with_daemon",
     "engine.serve_default_pipe",
+    "engine.daemon_json",
     "proxy.mode",
     "proxy.http",
     "proxy.https",
@@ -120,6 +137,15 @@ impl Configured {
         }
         for mirror in &self.registry.mirrors {
             check_url("registry.mirrors", mirror, &["http", "https"])?;
+        }
+        if let Some((key, instead)) = CONTR_DAEMON_KEYS
+            .iter()
+            .find(|(key, _)| self.engine.daemon_json.contains_key(*key))
+        {
+            return Err(SettingsError::InvalidValue {
+                path: "engine.daemon_json",
+                reason: format!("{key} is not available: {instead}"),
+            });
         }
 
         Ok(())
@@ -481,6 +507,25 @@ mod tests {
             r#"registry.mirrors: "mirror.corp" does not use http, https"#
         );
         assert!(refused("proxy.mode", json!("pac")).contains("wrong type"));
+    }
+
+    #[test]
+    fn daemon_json_takes_what_contr_does_not_set() {
+        let with = |daemon: Value| {
+            let mut settings = Settings::default();
+            settings.set("engine.daemon_json", daemon).unwrap();
+            effective(&settings, &Map::new())
+        };
+
+        let configured = with(json!({"debug": true, "log-level": "warn"})).unwrap().configured;
+        assert_eq!(configured.engine.daemon_json["log-level"], "warn");
+        assert_eq!(
+            with(json!({"debug": true, "registry-mirrors": []}))
+                .unwrap_err()
+                .to_string(),
+            "engine.daemon_json: registry-mirrors is not available: set registry.mirrors instead"
+        );
+        assert!(matches!(with(json!("{}")), Err(SettingsError::Value(_))));
     }
 
     #[test]

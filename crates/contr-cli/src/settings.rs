@@ -1,3 +1,4 @@
+use anyhow::Context;
 use clap::Subcommand;
 use contr_sdk::api::settings::v1::{
     CertificateSettings, EngineSettings, GetSettingsRequest, ProxyMode, ProxySettings, RegistrySettings,
@@ -11,7 +12,8 @@ use crate::format;
 pub(crate) enum SettingsCommand {
     /// Show every setting and which ones your organization manages.
     Show,
-    /// Change one setting, such as `engine.start_with_daemon true` or `registry.mirrors https://a,https://b`.
+    /// Change one setting, such as `engine.start_with_daemon true`, `registry.mirrors https://a,https://b` or
+    /// `engine.daemon_json @daemon.json`.
     Set { path: String, value: String },
     /// Return every setting you changed to its default.
     Reset,
@@ -78,6 +80,16 @@ fn with_value(path: &str, value: &str) -> anyhow::Result<Settings> {
                 ..Default::default()
             });
         }
+        "engine.daemon_json" => {
+            let daemon_json = match value.strip_prefix('@') {
+                Some(file) => std::fs::read_to_string(file).with_context(|| format!("cannot read {file}"))?,
+                None => value.to_owned(),
+            };
+            settings.engine = Some(EngineSettings {
+                daemon_json,
+                ..Default::default()
+            });
+        }
         "proxy.mode" => {
             let mode = PROXY_MODES
                 .iter()
@@ -133,9 +145,12 @@ fn print(state: &SettingsState) {
         .iter()
         .find(|(_, mode)| *mode == proxy.mode())
         .map_or("system", |(name, _)| name);
+    let daemon_json = serde_json::from_str::<serde_json::Value>(&engine.daemon_json)
+        .map_or(engine.daemon_json.clone(), |daemon| daemon.to_string());
     let rows: Vec<Vec<String>> = [
         ("engine.start_with_daemon", engine.start_with_daemon.to_string()),
         ("engine.serve_default_pipe", engine.serve_default_pipe.to_string()),
+        ("engine.daemon_json", daemon_json),
         ("proxy.mode", mode.to_owned()),
         ("proxy.http", proxy.http),
         ("proxy.https", proxy.https),

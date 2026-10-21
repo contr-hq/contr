@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use contr_core::proxy::Proxy;
 use contr_core::{ErrorReason, Remediation};
+use serde_json::{Map, Value};
 
 #[cfg(feature = "fake")]
 mod fake;
@@ -183,6 +184,13 @@ pub trait Backend: Send + Sync + 'static {
         let _ = settings;
     }
 
+    /// Asks the engine whether it takes `daemon` as the user's `daemon.json`, and fails with its reason when it does
+    /// not. A backend that cannot ask accepts it, and the engine's next start reports the problem instead.
+    async fn check_daemon_config(&self, daemon: &Map<String, Value>) -> Result<(), String> {
+        let _ = daemon;
+        Ok(())
+    }
+
     /// Remediations [`Backend::remediate`] runs; every remediation a blocker or check offers is one of them.
     fn remediations(&self) -> &'static [Remediation] {
         &[]
@@ -226,6 +234,8 @@ pub struct EngineSettings {
     pub trust_system_certificates: bool,
     /// Docker Hub mirrors the engine tries before Docker Hub.
     pub registry_mirrors: Vec<String>,
+    /// The user's `daemon.json`, which holds none of the keys the backend sets.
+    pub daemon: Map<String, Value>,
 }
 
 impl Default for EngineSettings {
@@ -234,6 +244,7 @@ impl Default for EngineSettings {
             proxy: ProxyChoice::System,
             trust_system_certificates: true,
             registry_mirrors: Vec::new(),
+            daemon: Map::new(),
         }
     }
 }

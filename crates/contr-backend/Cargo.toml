@@ -15,6 +15,7 @@ fake = ["dep:contr-testkit"]
 async-trait.workspace = true
 contr-core.workspace = true
 contr-testkit = { workspace = true, optional = true }
+serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tokio-stream.workspace = true

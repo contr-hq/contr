@@ -28,6 +28,7 @@ zbus.workspace = true
 bytes.workspace = true
 contr-daemon.workspace = true
 prost-types.workspace = true
+serde_json.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 
