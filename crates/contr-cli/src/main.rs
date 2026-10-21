@@ -20,6 +20,7 @@ use contr_sdk::api::daemon::v1::BackendKind;
 use contr_sdk::api::engine::v1::{
     EngineState, ResetRequest, ResetScope, StartRequest, StopRequest, reset_response, start_response, stop_response,
 };
+use contr_sdk::api::updates::v1::CheckForUpdatesRequest;
 use contr_sdk::{Client, ClientIdentity, Error};
 
 #[derive(Parser)]
@@ -66,6 +67,8 @@ enum Command {
         /// Identifier `doctor` prints, such as install-wsl.
         action_id: String,
     },
+    /// Check whether a newer Contr is published.
+    Update,
     /// Save a diagnostics bundle for support, with credentials and your name replaced.
     Bundle {
         /// Zip file to write instead of a new one in the current directory.
@@ -117,8 +120,41 @@ async fn run(command: Command) -> anyhow::Result<i32> {
         Command::Settings { command } => settings::run(&Client::connect_or_start(&identity).await?, command).await,
         Command::Doctor => doctor::doctor(&Client::connect_or_start(&identity).await?).await,
         Command::Fix { action_id } => doctor::fix(&Client::connect_or_start(&identity).await?, action_id).await,
+        Command::Update => update(&Client::connect_or_start(&identity).await?).await,
         Command::Bundle { output } => doctor::bundle(&Client::connect_or_start(&identity).await?, output).await,
     }
+}
+
+/// Prints the newest release after this daemon's version; exits 1 when the check failed.
+async fn update(client: &Client) -> anyhow::Result<i32> {
+    let status = client
+        .updates()
+        .check_for_updates(CheckForUpdatesRequest {})
+        .await
+        .map_err(Error::from)?
+        .into_inner()
+        .status
+        .unwrap_or_default();
+    if !status.error.is_empty() {
+        eprintln!("Cannot check for updates: {}", status.error);
+        return Ok(1);
+    }
+    match status.available {
+        Some(release) => println!(
+            "{} {} is available; you run {}. {}",
+            product::DISPLAY_NAME,
+            release.version,
+            status.current_version,
+            release.url
+        ),
+        None => println!(
+            "{} {} is the newest release.",
+            product::DISPLAY_NAME,
+            status.current_version
+        ),
+    }
+
+    Ok(0)
 }
 
 fn fail(error: &anyhow::Error) -> ExitCode {
