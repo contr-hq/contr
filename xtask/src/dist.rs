@@ -1,6 +1,7 @@
-//! The Windows core payload that the client's installer carries: the daemon and the CLI built for Windows, the WSL
-//! guest images and the Docker CLI tools, laid out the way `contrd` finds them next to itself, with a manifest that
-//! pins every file by SHA-256.
+//! Release archives. The Windows core payload, which the client's installer carries, holds the daemon and the CLI
+//! built for Windows, the WSL guest images and the Docker CLI tools, laid out the way `contrd` finds them next to
+//! itself, with a manifest that pins every file by SHA-256. The Linux archive holds the daemon and the CLI. Both carry
+//! their license notices.
 
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -12,20 +13,22 @@ use contr_core::{guest, product};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use crate::notices::{self, Contents};
+
 /// Directory name of the payload inside `out`.
 const PAYLOAD: &str = "contr-core-windows-x64";
+/// Directory name of the Linux archive inside `out`.
+const LINUX: &str = "contr-linux-x64";
 /// Manifest at the payload's root.
 const MANIFEST: &str = "core.json";
+/// Manifest of the Docker CLI tools, which packaging/windows/cli.Dockerfile writes.
+const CLI_MANIFEST: &str = "cli.json";
 
 /// Assembles the payload from the Windows executables in `binaries`, target/guest and target/windows-cli.
 pub(crate) fn windows(root: &Path, binaries: &Path, out: &Path) -> anyhow::Result<()> {
     let guest_dir = root.join("target/guest");
     let cli_dir = root.join("target/windows-cli");
-    let payload = out.join(PAYLOAD);
-    if payload.exists() {
-        fs::remove_dir_all(&payload).with_context(|| format!("cannot clear {}", payload.display()))?;
-    }
-    fs::create_dir_all(&payload).with_context(|| format!("cannot create {}", payload.display()))?;
+    let payload = fresh_dir(&out.join(PAYLOAD))?;
 
     for binary in [product::DAEMON_BINARY, product::CLI_BINARY] {
         let file = format!("{binary}.exe");
@@ -34,14 +37,22 @@ pub(crate) fn windows(root: &Path, binaries: &Path, out: &Path) -> anyhow::Resul
 
     let guest_manifest: Value = read_json(&guest_dir.join(guest::MANIFEST_FILE))?;
     let release = text(&guest_manifest, "release")?;
-    for file in [
-        guest::MANIFEST_FILE,
-        text(&guest_manifest, "runtime")?,
-        text(&guest_manifest, "data")?,
-    ] {
+    let images = [text(&guest_manifest, "runtime")?, text(&guest_manifest, "data")?];
+    for file in [guest::MANIFEST_FILE, images[0], images[1]] {
         copy(&guest_dir.join(file), &payload.join("guest").join(file))?;
     }
     copy_tree(&cli_dir, &payload.join("cli"))?;
+    let cli_tools = read_json(&cli_dir.join(CLI_MANIFEST))?;
+    let image_paths = images.map(|image| guest_dir.join(image));
+    let image_paths: Vec<&Path> = image_paths.iter().map(PathBuf::as_path).collect();
+    notices::write(
+        root,
+        &payload,
+        &Contents {
+            cli_tools: Some(&cli_tools),
+            guest_images: &image_paths,
+        },
+    )?;
 
     let api_revision: u32 = fs::read_to_string(root.join("proto/API_REVISION"))
         .context("cannot read proto/API_REVISION")?
@@ -57,6 +68,34 @@ pub(crate) fn windows(root: &Path, binaries: &Path, out: &Path) -> anyhow::Resul
 
     println!("{release}: {}", payload.display());
     Ok(())
+}
+
+/// Assembles the Linux archive from the Linux executables in `binaries`.
+pub(crate) fn linux(root: &Path, binaries: &Path, out: &Path) -> anyhow::Result<()> {
+    let archive = fresh_dir(&out.join(LINUX))?;
+    for binary in [product::DAEMON_BINARY, product::CLI_BINARY] {
+        copy(&binaries.join(binary), &archive.join(binary))?;
+    }
+    notices::write(
+        root,
+        &archive,
+        &Contents {
+            cli_tools: None,
+            guest_images: &[],
+        },
+    )?;
+
+    println!("{}", archive.display());
+    Ok(())
+}
+
+fn fresh_dir(dir: &Path) -> anyhow::Result<PathBuf> {
+    if dir.exists() {
+        fs::remove_dir_all(dir).with_context(|| format!("cannot clear {}", dir.display()))?;
+    }
+    fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
+
+    Ok(dir.to_path_buf())
 }
 
 fn read_json(path: &Path) -> anyhow::Result<Value> {
