@@ -28,7 +28,8 @@ generator. The desktop clients live in their own repositories and talk to the da
   gives one of the user's own WSL 2 distributions `docker`, Compose and Buildx on the same engine, with binds of
   the distribution's paths.
 - Both: `contr settings` shows and changes the daemon's settings, and `contr doctor` checks what keeps the engine
-  from working and offers fixes that `contr fix` runs.
+  from working and offers fixes that `contr fix` runs. `contr bundle` saves a diagnostics zip for support, with
+  credentials and the user's name, home directory and computer name replaced.
 
 ## Settings managed by an administrator
 
