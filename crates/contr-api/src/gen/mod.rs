@@ -5,6 +5,11 @@ pub mod contr {
             include!("contr.common.v1.rs");
         }
     }
+    pub mod compose {
+        pub mod v1 {
+            include!("contr.compose.v1.rs");
+        }
+    }
     pub mod containers {
         pub mod v1 {
             include!("contr.containers.v1.rs");
