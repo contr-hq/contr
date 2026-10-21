@@ -27,3 +27,19 @@ pub(crate) fn build(root: &Path) -> anyhow::Result<()> {
     println!("{}", out.display());
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use contr_core::kube;
+
+    #[test]
+    fn kubectl_matches_the_clusters_default_version() {
+        let dockerfile = include_str!("../../packaging/windows/cli.Dockerfile");
+        let kubectl = dockerfile
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("ARG KUBECTL_VERSION="))
+            .expect("the Dockerfile pins kubectl");
+
+        assert_eq!(format!("v{kubectl}"), kube::VERSIONS[0]);
+    }
+}
