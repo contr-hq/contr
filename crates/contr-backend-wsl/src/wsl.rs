@@ -41,6 +41,14 @@ pub(crate) async fn version() -> Option<String> {
     })
 }
 
+/// What `wsl.exe` prints for `args`, standard output then standard error, or why it did not run.
+pub(crate) async fn report(args: &[&str]) -> String {
+    match run(args).await {
+        Ok(output) => format!("{}{}", decode(&output.stdout), decode(&output.stderr)),
+        Err(error) => format!("cannot run wsl.exe: {error}\n"),
+    }
+}
+
 /// Names of the registered distributions.
 pub(crate) async fn distributions() -> io::Result<Vec<String>> {
     let output = run(["--list", "--quiet"]).await?;

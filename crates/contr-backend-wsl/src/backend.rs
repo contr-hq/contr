@@ -5,9 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use contr_backend::{
-    Backend, BackendError, BackendKind, BackendSettings, Blocker, Capability, Check, CheckStatus, EngineConnector,
-    EngineSettings, IntegrationState, Probe, Progress, ProgressSink, RemediationOutcome, ResetScope, WslDistribution,
-    WslIntegration,
+    Backend, BackendError, BackendKind, BackendSettings, Blocker, Capability, Check, CheckStatus, DiagnosticFile,
+    EngineConnector, EngineSettings, IntegrationState, Probe, Progress, ProgressSink, RemediationOutcome, ResetScope,
+    WslDistribution, WslIntegration,
 };
 use contr_core::guest::{ConfigRejection, EngineConfig};
 use contr_core::{ErrorReason, Remediation, paths, product};
@@ -264,6 +264,22 @@ impl Backend for WslBackend {
         checks.push(integration_check(&self.integrations.states()));
 
         checks
+    }
+
+    async fn diagnostic_files(&self) -> Vec<DiagnosticFile> {
+        let mut files = Vec::new();
+        for (name, args) in [
+            ("wsl-version.txt", ["--version"].as_slice()),
+            ("wsl-status.txt", &["--status"]),
+            ("wsl-list.txt", &["--list", "--verbose"]),
+        ] {
+            files.push(DiagnosticFile {
+                name: name.to_owned(),
+                text: wsl::report(args).await,
+            });
+        }
+
+        files
     }
 
     async fn remediate(
