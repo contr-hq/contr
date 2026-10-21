@@ -35,11 +35,14 @@ pub(crate) async fn run(client: &Client, command: Option<SettingsCommand>) -> an
                 update_mask: Some(prost_types::FieldMask { paths: vec![path] }),
                 etag: String::new(),
             };
-            let response = settings
-                .update_settings(request)
-                .await
-                .map_err(Error::from)?
-                .into_inner();
+            let response = match settings.update_settings(request).await {
+                Ok(response) => response.into_inner(),
+                Err(status) => {
+                    let error = Error::from(status);
+                    explain_unknown_keys(&error);
+                    return Err(error.into());
+                }
+            };
             (response.state, response.restart_required)
         }
         SettingsCommand::Reset => {
@@ -57,6 +60,23 @@ pub(crate) async fn run(client: &Client, command: Option<SettingsCommand>) -> an
         println!("{path} applies when the engine next starts.");
     }
     Ok(0)
+}
+
+/// Names each `daemon.json` key the engine does not know, with the key it takes instead.
+fn explain_unknown_keys(error: &Error) {
+    let Some(rejection) = error.daemon_json_rejection() else {
+        return;
+    };
+    for unknown in rejection.unknown_keys {
+        if unknown.suggestion.is_empty() {
+            eprintln!("{} is not an engine option.", unknown.key);
+        } else {
+            eprintln!(
+                "{} is not an engine option; did you mean {}?",
+                unknown.key, unknown.suggestion
+            );
+        }
+    }
 }
 
 /// Settings holding `value` at `path`, for an update whose mask names only `path`.

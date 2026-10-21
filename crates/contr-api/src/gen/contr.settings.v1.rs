@@ -21,7 +21,7 @@ pub struct EngineSettings {
     pub serve_default_pipe: bool,
     /// The engine's daemon.json as a JSON object; "{}" holds no settings. Contr sets hosts, data-root, host-gateway-ip,
     /// host-gateway-ips, proxies and registry-mirrors itself, so UpdateSettings refuses them, and also refuses what the
-    /// engine rejects when it can ask the engine. Applies only where DaemonService.GetInfo reports
+    /// engine rejects when it can ask the engine, with a DaemonJsonRejection detail. Applies only where DaemonService.GetInfo reports
     /// CAPABILITY_ENGINE_CONFIGURATION, from the next engine start.
     #[prost(string, tag = "3")]
     pub daemon_json: ::prost::alloc::string::String,
@@ -59,6 +59,22 @@ pub struct RegistrySettings {
     /// Docker Hub mirrors the engine tries before Docker Hub, as http:// or https:// URLs.
     #[prost(string, repeated, tag = "1")]
     pub mirrors: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+/// Detail of the INVALID_ARGUMENT status UpdateSettings returns when the engine rejects engine.daemon_json.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DaemonJsonRejection {
+    /// Top-level keys the engine does not know, sorted.
+    #[prost(message, repeated, tag = "1")]
+    pub unknown_keys: ::prost::alloc::vec::Vec<UnknownDaemonKey>,
+}
+/// A top-level daemon.json key the engine does not know.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UnknownDaemonKey {
+    #[prost(string, tag = "1")]
+    pub key: ::prost::alloc::string::String,
+    /// A key the engine accepts with the same value, such as "log-opts" for "log-opt"; empty when no known key is close.
+    #[prost(string, tag = "2")]
+    pub suggestion: ::prost::alloc::string::String,
 }
 /// Effective settings at one point in time.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

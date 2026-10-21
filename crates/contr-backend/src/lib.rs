@@ -7,6 +7,7 @@ use std::io;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
+use contr_core::guest::ConfigRejection;
 use contr_core::proxy::Proxy;
 use contr_core::{ErrorReason, Remediation};
 use serde_json::{Map, Value};
@@ -184,9 +185,9 @@ pub trait Backend: Send + Sync + 'static {
         let _ = settings;
     }
 
-    /// Asks the engine whether it takes `daemon` as the user's `daemon.json`, and fails with its reason when it does
-    /// not. A backend that cannot ask accepts it, and the engine's next start reports the problem instead.
-    async fn check_daemon_config(&self, daemon: &Map<String, Value>) -> Result<(), String> {
+    /// Asks the engine whether it takes `daemon` as the user's `daemon.json`, and fails with its objections when it
+    /// does not. A backend that cannot ask accepts it, and the engine's next start reports the problem instead.
+    async fn check_daemon_config(&self, daemon: &Map<String, Value>) -> Result<(), ConfigRejection> {
         let _ = daemon;
         Ok(())
     }
