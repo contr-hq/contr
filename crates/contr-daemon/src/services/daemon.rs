@@ -4,11 +4,12 @@ use contr_api::API_REVISION;
 use contr_api::daemon::v1 as proto;
 use contr_api::daemon::v1::daemon_service_server::DaemonService;
 use contr_backend::{BackendKind, Capability};
+use contr_core::product;
 use tonic::{Request, Response, Status};
 
 use super::Shared;
 
-const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
+const DAEMON_VERSION: &str = product::VERSION;
 
 pub(crate) struct DaemonApi(pub(crate) Arc<Shared>);
 

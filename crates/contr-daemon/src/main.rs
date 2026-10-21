@@ -15,7 +15,7 @@ use tracing_subscriber::{EnvFilter, fmt};
 const LOG_RING_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Parser)]
-#[command(name = product::DAEMON_BINARY, version, about)]
+#[command(name = product::DAEMON_BINARY, version = product::VERSION, about)]
 struct Args {
     /// Engine backend.
     #[arg(long, value_enum, default_value_t = Backend::default())]
