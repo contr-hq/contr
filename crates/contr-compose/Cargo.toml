@@ -8,5 +8,18 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[dependencies]
+contr-api.workspace = true
+futures-util.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "process"] }
+tokio-stream = { workspace = true, features = ["io-util"] }
+
+[dev-dependencies]
+prost-types.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
+
 [lints]
 workspace = true

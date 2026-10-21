@@ -15,6 +15,7 @@ contr-api = { path = "crates/contr-api" }
 contr-backend = { path = "crates/contr-backend" }
 contr-backend-host = { path = "crates/contr-backend-host" }
 contr-backend-wsl = { path = "crates/contr-backend-wsl" }
+contr-compose = { path = "crates/contr-compose" }
 contr-core = { path = "crates/contr-core" }
 contr-daemon = { path = "crates/contr-daemon" }
 contr-engine = { path = "crates/contr-engine" }
