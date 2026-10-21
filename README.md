@@ -29,14 +29,16 @@ generator. The desktop clients live in their own repositories and talk to the da
   the distribution's paths.
 - Both: `contr settings` shows and changes the daemon's settings, and `contr doctor` checks what keeps the engine
   from working and offers fixes that `contr fix` runs. `contr bundle` saves a diagnostics zip for support, with
-  credentials and the user's name, home directory and computer name replaced.
+  credentials and the user's name, home directory and computer name replaced. The daemon checks the published releases
+  once a day through the configured proxy, and `contr update` checks now.
 
 ## Settings managed by an administrator
 
 An administrator fixes settings for every user of a computer with a JSON object shaped like the user's settings
-file, for example `{"engine": {"serveDefaultPipe": false}}`. On Windows it is the `Settings` string value of
-`HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Contr`; on Linux it is `/etc/contr/admin-settings.json`. Clients show those
-settings as managed by the organization, and the daemon refuses changes to them.
+file, for example `{"engine": {"serveDefaultPipe": false}}`, or `{"updates": {"check": false}}` to stop update
+checks. On Windows it is the `Settings` string value of `HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Contr`; on Linux it is
+`/etc/contr/admin-settings.json`. Clients show those settings as managed by the organization, and the daemon refuses
+changes to them.
 
 ## Layout
 
