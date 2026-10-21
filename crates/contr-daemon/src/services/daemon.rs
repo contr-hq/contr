@@ -70,5 +70,6 @@ fn capability_value(capability: Capability) -> proto::Capability {
         Capability::WslIntegration => proto::Capability::WslIntegration,
         Capability::HostPortForwarding => proto::Capability::HostPortForwarding,
         Capability::Reset => proto::Capability::Reset,
+        Capability::EngineConfiguration => proto::Capability::EngineConfiguration,
     }
 }

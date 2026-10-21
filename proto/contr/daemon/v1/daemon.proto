@@ -46,6 +46,8 @@ enum Capability {
   CAPABILITY_HOST_PORT_FORWARDING = 5;
   // EngineService.Reset is available.
   CAPABILITY_RESET = 6;
+  // The engine applies the proxy, certificate and registry settings.
+  CAPABILITY_ENGINE_CONFIGURATION = 7;
 }
 
 message GetInfoRequest {}

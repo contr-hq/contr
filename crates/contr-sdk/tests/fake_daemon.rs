@@ -19,7 +19,8 @@ use contr_sdk::api::engine::v1::{
 use contr_sdk::api::images::v1::InspectImageRequest;
 use contr_sdk::api::networks::v1::{CheckHostPortsRequest, HostPort};
 use contr_sdk::api::settings::v1::{
-    EngineSettings, GetSettingsRequest, ResetSettingsRequest, Settings, UpdateSettingsRequest,
+    EngineSettings, GetSettingsRequest, ProxyMode, ProxySettings, RegistrySettings, ResetSettingsRequest, Settings,
+    UpdateSettingsRequest,
 };
 use contr_sdk::{Client, ClientIdentity, Endpoint, Error};
 use tokio::sync::oneshot;
@@ -545,6 +546,7 @@ fn engine_update(start_with_daemon: bool, etag: &str) -> UpdateSettingsRequest {
                 start_with_daemon,
                 serve_default_pipe: false,
             }),
+            ..Default::default()
         }),
         update_mask: Some(prost_types::FieldMask {
             paths: vec!["engine.start_with_daemon".to_owned()],
@@ -614,6 +616,89 @@ async fn settings_persist_and_start_the_engine_with_the_daemon() {
         .state
         .unwrap();
     assert!(!reset.settings.unwrap().engine.unwrap().start_with_daemon);
+
+    daemon.stop().await;
+}
+
+#[tokio::test]
+async fn proxy_and_mirror_settings_are_checked_and_stored() {
+    let daemon = Daemon::start();
+    let client = daemon.client().await;
+    let update = |settings: Settings, paths: &[&str]| UpdateSettingsRequest {
+        settings: Some(settings),
+        update_mask: Some(prost_types::FieldMask {
+            paths: paths.iter().map(|path| (*path).to_owned()).collect(),
+        }),
+        etag: String::new(),
+    };
+
+    let defaults = client
+        .settings()
+        .get_settings(GetSettingsRequest {})
+        .await
+        .unwrap()
+        .into_inner()
+        .state
+        .unwrap()
+        .settings
+        .unwrap();
+    assert_eq!(defaults.proxy.unwrap().mode(), ProxyMode::System);
+    assert!(defaults.certificates.unwrap().trust_system);
+
+    let manual = Settings {
+        proxy: Some(ProxySettings {
+            mode: ProxyMode::Manual.into(),
+            http: "proxy.corp:3128".to_owned(),
+            ..Default::default()
+        }),
+        registry: Some(RegistrySettings {
+            mirrors: vec!["https://mirror.corp".to_owned()],
+        }),
+        ..Default::default()
+    };
+    let stored = client
+        .settings()
+        .update_settings(update(manual, &["proxy.mode", "proxy.http", "registry.mirrors"]))
+        .await
+        .unwrap()
+        .into_inner()
+        .state
+        .unwrap()
+        .settings
+        .unwrap();
+    let proxy = stored.proxy.unwrap();
+    assert_eq!(proxy.mode(), ProxyMode::Manual);
+    assert_eq!(proxy.http, "proxy.corp:3128");
+    assert_eq!(stored.registry.unwrap().mirrors, ["https://mirror.corp"]);
+
+    let unusable = Settings {
+        registry: Some(RegistrySettings {
+            mirrors: vec!["mirror.corp".to_owned()],
+        }),
+        ..Default::default()
+    };
+    let refused = client
+        .settings()
+        .update_settings(update(unusable, &["registry.mirrors"]))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), tonic::Code::InvalidArgument);
+    assert!(
+        refused.message().starts_with("registry.mirrors: "),
+        "{}",
+        refused.message()
+    );
+
+    let unnamed = Settings {
+        proxy: Some(ProxySettings::default()),
+        ..Default::default()
+    };
+    let refused = client
+        .settings()
+        .update_settings(update(unnamed, &["proxy.mode"]))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), tonic::Code::InvalidArgument);
 
     daemon.stop().await;
 }

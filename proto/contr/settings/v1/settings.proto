@@ -22,6 +22,9 @@ service SettingsService {
 
 message Settings {
   EngineSettings engine = 1;
+  ProxySettings proxy = 2;
+  CertificateSettings certificates = 3;
+  RegistrySettings registry = 4;
 }
 
 message EngineSettings {
@@ -30,6 +33,45 @@ message EngineSettings {
   // Windows: also serves the engine on \\.\pipe\docker_engine when no other program does, so tools that ignore Docker
   // contexts reach it. Takes effect at the next engine start.
   bool serve_default_pipe = 2;
+}
+
+// How the engine reaches servers outside the machine, for pulls, pushes and builds. Applies only where
+// DaemonService.GetInfo reports CAPABILITY_ENGINE_CONFIGURATION, from the next engine start.
+message ProxySettings {
+  ProxyMode mode = 1;
+  // Manual mode: proxy for http:// destinations, such as "http://proxy.example.com:3128"; a server without a scheme
+  // speaks HTTP.
+  string http = 2;
+  // Manual mode: proxy for https:// destinations.
+  string https = 3;
+  // Manual mode: destinations reached directly, as a NO_PROXY list such as ".corp.example.com,10.0.0.0/8".
+  string exclude = 4;
+}
+
+enum ProxyMode {
+  PROXY_MODE_UNSPECIFIED = 0;
+  // Windows' proxy settings, including a configuration script or automatic detection; when they name no proxy, and
+  // on Linux, HTTP_PROXY, HTTPS_PROXY and NO_PROXY.
+  PROXY_MODE_SYSTEM = 1;
+  // The servers in ProxySettings.
+  PROXY_MODE_MANUAL = 2;
+  // Direct connections.
+  PROXY_MODE_NONE = 3;
+}
+
+// Certificates the engine trusts. Applies only where DaemonService.GetInfo reports CAPABILITY_ENGINE_CONFIGURATION,
+// from the next engine start.
+message CertificateSettings {
+  // The engine also trusts the root certificates the operating system trusts, including those an organization deploys
+  // to inspect HTTPS traffic.
+  bool trust_system = 1;
+}
+
+// Registries the engine uses. Applies only where DaemonService.GetInfo reports CAPABILITY_ENGINE_CONFIGURATION, from
+// the next engine start.
+message RegistrySettings {
+  // Docker Hub mirrors the engine tries before Docker Hub, as http:// or https:// URLs.
+  repeated string mirrors = 1;
 }
 
 // Effective settings at one point in time.

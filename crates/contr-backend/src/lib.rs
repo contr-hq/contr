@@ -7,6 +7,7 @@ use std::io;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
+use contr_core::proxy::Proxy;
 use contr_core::{ErrorReason, Remediation};
 
 #[cfg(feature = "fake")]
@@ -45,6 +46,8 @@ pub enum Capability {
     HostPortForwarding,
     /// Restoring the engine to a clean state, which only a backend that owns its engine offers.
     Reset,
+    /// Applying [`EngineSettings`], which only a backend that owns its engine does.
+    EngineConfiguration,
 }
 
 /// Engine lifecycle state reported to clients.
@@ -205,11 +208,45 @@ pub trait Backend: Send + Sync + 'static {
 }
 
 /// User settings a backend applies itself.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BackendSettings {
     /// Also serve the engine where the Docker CLI looks when no context names another endpoint, while no other
     /// program does.
     pub serve_default_endpoint: bool,
+    /// Settings of an engine the backend owns.
+    pub engine: EngineSettings,
+}
+
+/// How an engine the backend owns reaches registries; see [`Capability::EngineConfiguration`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EngineSettings {
+    /// Proxy for the engine's own connections.
+    pub proxy: ProxyChoice,
+    /// The engine also trusts the root certificates the operating system trusts.
+    pub trust_system_certificates: bool,
+    /// Docker Hub mirrors the engine tries before Docker Hub.
+    pub registry_mirrors: Vec<String>,
+}
+
+impl Default for EngineSettings {
+    fn default() -> Self {
+        Self {
+            proxy: ProxyChoice::System,
+            trust_system_certificates: true,
+            registry_mirrors: Vec::new(),
+        }
+    }
+}
+
+/// Where the engine's proxy comes from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProxyChoice {
+    /// The operating system's proxy, looked up when the engine starts.
+    System,
+    /// These servers.
+    Manual(Proxy),
+    /// Direct connections.
+    Direct,
 }
 
 /// Result of one diagnostic check.

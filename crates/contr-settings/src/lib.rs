@@ -6,6 +6,8 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 
+use contr_core::proxy::{exclusions, server_url};
+use http::Uri;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -15,6 +17,9 @@ use serde_json::{Map, Value};
 #[serde(rename_all = "camelCase", default)]
 pub struct Configured {
     pub engine: Engine,
+    pub proxy: Proxy,
+    pub certificates: Certificates,
+    pub registry: Registry,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,8 +38,106 @@ impl Default for Engine {
     }
 }
 
+/// How the engine reaches servers outside the machine.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Proxy {
+    pub mode: ProxyMode,
+    /// Manual mode: proxy for `http://` destinations, as `http://proxy.example.com:3128`.
+    pub http: String,
+    /// Manual mode: proxy for `https://` destinations.
+    pub https: String,
+    /// Manual mode: destinations reached directly, as a `NO_PROXY` list.
+    pub exclude: String,
+}
+
+impl Proxy {
+    /// The servers of manual mode; a server without a scheme speaks HTTP.
+    pub fn manual(&self) -> contr_core::proxy::Proxy {
+        let server = |text: &str| Some(text.trim()).filter(|text| !text.is_empty()).map(server_url);
+
+        contr_core::proxy::Proxy {
+            http: server(&self.http),
+            https: server(&self.https),
+            exclude: exclusions(&self.exclude),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProxyMode {
+    /// The operating system's proxy.
+    #[default]
+    System,
+    /// The servers of [`Proxy`].
+    Manual,
+    /// Direct connections.
+    None,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Certificates {
+    /// The engine also trusts the root certificates the operating system trusts.
+    pub trust_system: bool,
+}
+
+impl Default for Certificates {
+    fn default() -> Self {
+        Self { trust_system: true }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Registry {
+    /// URLs of Docker Hub mirrors the engine tries before Docker Hub.
+    pub mirrors: Vec<String>,
+}
+
 /// Every path a user may change and an administrator may fix.
-pub const PATHS: [&str; 2] = ["engine.start_with_daemon", "engine.serve_default_pipe"];
+pub const PATHS: [&str; 8] = [
+    "engine.start_with_daemon",
+    "engine.serve_default_pipe",
+    "proxy.mode",
+    "proxy.http",
+    "proxy.https",
+    "proxy.exclude",
+    "certificates.trust_system",
+    "registry.mirrors",
+];
+
+/// URL schemes of a proxy server the engine connects through.
+const PROXY_SCHEMES: [&str; 4] = ["http", "https", "socks5", "socks5h"];
+
+impl Configured {
+    fn validate(&self) -> Result<(), SettingsError> {
+        for (path, server) in [("proxy.http", &self.proxy.http), ("proxy.https", &self.proxy.https)] {
+            if !server.trim().is_empty() {
+                check_url(path, &server_url(server), &PROXY_SCHEMES)?;
+            }
+        }
+        for mirror in &self.registry.mirrors {
+            check_url("registry.mirrors", mirror, &["http", "https"])?;
+        }
+
+        Ok(())
+    }
+}
+
+fn check_url(path: &'static str, url: &str, schemes: &[&str]) -> Result<(), SettingsError> {
+    let invalid = |reason: String| SettingsError::InvalidValue { path, reason };
+    let uri: Uri = url.parse().map_err(|_| invalid(format!("{url:?} is not a URL")))?;
+    if !uri.scheme_str().is_some_and(|scheme| schemes.contains(&scheme)) {
+        return Err(invalid(format!("{url:?} does not use {}", schemes.join(", "))));
+    }
+    if uri.host().is_none_or(str::is_empty) {
+        return Err(invalid(format!("{url:?} names no server")));
+    }
+
+    Ok(())
+}
 
 /// Effective settings and the paths an administrator fixes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -58,10 +161,10 @@ pub fn effective(user: &Settings, policy: &Map<String, Value>) -> Result<Effecti
         }
     }
 
-    Ok(Effective {
-        configured: serde_json::from_value(merged).map_err(SettingsError::Value)?,
-        locked,
-    })
+    let configured: Configured = serde_json::from_value(merged).map_err(SettingsError::Value)?;
+    configured.validate()?;
+
+    Ok(Effective { configured, locked })
 }
 
 /// The administrator's policy: a JSON object shaped like the stored settings.
@@ -138,6 +241,8 @@ pub enum SettingsError {
     UnknownPath(String),
     #[error("a setting has a value of the wrong type")]
     Value(#[source] serde_json::Error),
+    #[error("{path}: {reason}")]
+    InvalidValue { path: &'static str, reason: String },
 }
 
 /// The settings file of one user; its owner serializes updates.
@@ -327,6 +432,55 @@ mod tests {
             Err(SettingsError::Value(_))
         ));
         assert!(parse_policy("[]").is_err());
+    }
+
+    #[test]
+    fn the_engine_uses_the_system_proxy_and_certificates_by_default() {
+        let configured = effective(&Settings::default(), &Map::new()).unwrap().configured;
+
+        assert_eq!(configured.proxy.mode, ProxyMode::System);
+        assert!(configured.certificates.trust_system);
+        assert!(configured.registry.mirrors.is_empty());
+    }
+
+    #[test]
+    fn manual_proxies_take_servers_without_a_scheme() {
+        let mut settings = Settings::default();
+        settings.set("proxy.mode", json!("manual")).unwrap();
+        settings.set("proxy.http", json!("proxy.corp:3128")).unwrap();
+        settings.set("proxy.exclude", json!(".corp, 10.0.0.0/8")).unwrap();
+
+        let proxy = effective(&settings, &Map::new()).unwrap().configured.proxy;
+
+        assert_eq!(proxy.mode, ProxyMode::Manual);
+        assert_eq!(
+            proxy.manual(),
+            contr_core::proxy::Proxy {
+                http: Some("http://proxy.corp:3128".to_owned()),
+                https: None,
+                exclude: vec![".corp".to_owned(), "10.0.0.0/8".to_owned()],
+            }
+        );
+    }
+
+    #[test]
+    fn refuses_unusable_proxies_and_mirrors() {
+        let refused = |path: &str, value: Value| {
+            let mut settings = Settings::default();
+            settings.set(path, value).unwrap();
+            effective(&settings, &Map::new()).unwrap_err().to_string()
+        };
+
+        assert_eq!(
+            refused("proxy.https", json!("ftp://proxy:21")),
+            r#"proxy.https: "ftp://proxy:21" does not use http, https, socks5, socks5h"#
+        );
+        assert!(refused("proxy.http", json!("http://proxy with space:1")).starts_with("proxy.http: "));
+        assert_eq!(
+            refused("registry.mirrors", json!(["https://mirror.corp", "mirror.corp"])),
+            r#"registry.mirrors: "mirror.corp" does not use http, https"#
+        );
+        assert!(refused("proxy.mode", json!("pac")).contains("wrong type"));
     }
 
     #[test]
