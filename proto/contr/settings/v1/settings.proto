@@ -25,6 +25,7 @@ message Settings {
   ProxySettings proxy = 2;
   CertificateSettings certificates = 3;
   RegistrySettings registry = 4;
+  KubernetesSettings kubernetes = 5;
 }
 
 message EngineSettings {
@@ -80,6 +81,18 @@ message CertificateSettings {
 message RegistrySettings {
   // Docker Hub mirrors the engine tries before Docker Hub, as http:// or https:// URLs.
   repeated string mirrors = 1;
+}
+
+// The single-node cluster KubernetesService reports. Applies only where DaemonService.GetInfo reports
+// CAPABILITY_KUBERNETES.
+message KubernetesSettings {
+  // Runs the cluster whenever the engine runs.
+  bool enabled = 1;
+  // Kubernetes version, one of Cluster.available_versions such as "v1.37.1"; empty runs the default. Changing it
+  // deletes the cluster's data.
+  string version = 2;
+  // Runs the Traefik ingress controller.
+  bool traefik = 3;
 }
 
 // Detail of the INVALID_ARGUMENT status UpdateSettings returns when the engine rejects engine.daemon_json.

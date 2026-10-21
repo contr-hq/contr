@@ -9,6 +9,8 @@ pub struct Settings {
     pub certificates: ::core::option::Option<CertificateSettings>,
     #[prost(message, optional, tag = "4")]
     pub registry: ::core::option::Option<RegistrySettings>,
+    #[prost(message, optional, tag = "5")]
+    pub kubernetes: ::core::option::Option<KubernetesSettings>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct EngineSettings {
@@ -63,6 +65,21 @@ pub struct RegistrySettings {
     /// Docker Hub mirrors the engine tries before Docker Hub, as http:// or https:// URLs.
     #[prost(string, repeated, tag = "1")]
     pub mirrors: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+/// The single-node cluster KubernetesService reports. Applies only where DaemonService.GetInfo reports
+/// CAPABILITY_KUBERNETES.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct KubernetesSettings {
+    /// Runs the cluster whenever the engine runs.
+    #[prost(bool, tag = "1")]
+    pub enabled: bool,
+    /// Kubernetes version, one of Cluster.available_versions such as "v1.37.1"; empty runs the default. Changing it
+    /// deletes the cluster's data.
+    #[prost(string, tag = "2")]
+    pub version: ::prost::alloc::string::String,
+    /// Runs the Traefik ingress controller.
+    #[prost(bool, tag = "3")]
+    pub traefik: bool,
 }
 /// Detail of the INVALID_ARGUMENT status UpdateSettings returns when the engine rejects engine.daemon_json.
 #[derive(Clone, PartialEq, ::prost::Message)]
