@@ -94,18 +94,24 @@ pub(crate) async fn exec(name: &str, args: &[&str]) -> io::Result<()> {
     check(&output, &format!("run {} in {name}", args.join(" ")))
 }
 
-/// Hands the engine in distribution `name` the configuration `config` for its next start.
-pub(crate) async fn configure(name: &str, config: &guest::EngineConfig) -> io::Result<()> {
-    let mut agent = wsl()
-        .args([
-            "--distribution",
-            name,
-            "--user",
-            "root",
-            "--exec",
-            guest::AGENT_PATH,
-            "configure",
-        ])
+/// Hands the engine in distribution `name` the configuration `config` for its next start, or with
+/// [`Configure::Check`] only asks the engine whether it accepts it. A rejection fails with
+/// [`io::ErrorKind::InvalidInput`] and the engine's reason.
+pub(crate) async fn configure(name: &str, config: &guest::EngineConfig, mode: Configure) -> io::Result<()> {
+    let mut command = wsl();
+    command.args([
+        "--distribution",
+        name,
+        "--user",
+        "root",
+        "--exec",
+        guest::AGENT_PATH,
+        "configure",
+    ]);
+    if mode == Configure::Check {
+        command.arg("--check");
+    }
+    let mut agent = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -115,8 +121,29 @@ pub(crate) async fn configure(name: &str, config: &guest::EngineConfig) -> io::R
         stdin.write_all(&serde_json::to_vec(config)?).await?;
     }
     let output = agent.wait_with_output().await?;
+    if output.status.code() == Some(i32::from(guest::CONFIG_REJECTED)) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            rejection(&decode(&output.stderr)),
+        ));
+    }
 
     check(&output, &format!("configure the engine in {name}"))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Configure {
+    Apply,
+    Check,
+}
+
+/// The agent's error message in `stderr`, which may also hold warnings `wsl.exe` printed first.
+fn rejection(stderr: &str) -> String {
+    let message = stderr
+        .find("Error: ")
+        .map_or(stderr, |start| &stderr[start + "Error: ".len()..]);
+
+    message.trim().to_owned()
 }
 
 /// Registers `image` as WSL 2 distribution `name`, with its virtual disk in `install_dir`.
@@ -238,6 +265,17 @@ fn listed(listing: &str) -> Vec<Listed> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rejection_is_the_agents_message_without_wsl_warnings() {
+        let stderr = "wsl: A localhost proxy configuration was detected but not mirrored into WSL.\r\n\
+                      Error: the engine rejects its configuration: unknown key debgu\n";
+
+        assert_eq!(
+            rejection(stderr),
+            "the engine rejects its configuration: unknown key debgu"
+        );
+    }
 
     #[test]
     fn decodes_utf8_and_utf16_output() {

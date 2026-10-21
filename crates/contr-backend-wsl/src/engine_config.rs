@@ -62,12 +62,17 @@ pub(crate) async fn resolve(settings: &contr_backend::EngineSettings) -> EngineC
         "configuring the engine"
     );
 
-    compose(&proxy, &settings.registry_mirrors, certificates)
+    compose(&settings.daemon, &proxy, &settings.registry_mirrors, certificates)
 }
 
-/// The engine's configuration for `proxy`, `mirrors` and the PEM `certificates`.
-pub(crate) fn compose(proxy: &Proxy, mirrors: &[String], certificates: String) -> EngineConfig {
-    let mut daemon = Map::new();
+/// The engine's configuration: the user's `daemon` with `proxy` and `mirrors` added, and the PEM `certificates`.
+pub(crate) fn compose(
+    daemon: &Map<String, Value>,
+    proxy: &Proxy,
+    mirrors: &[String],
+    certificates: String,
+) -> EngineConfig {
+    let mut daemon = daemon.clone();
     if !proxy.is_direct() {
         let mut proxies = Map::new();
         if let Some(http) = &proxy.http {
@@ -130,12 +135,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_direct_engine_gets_only_its_mirrors() {
-        let config = compose(&Proxy::default(), &["https://mirror.corp".to_owned()], String::new());
+    fn a_direct_engine_gets_the_users_settings_and_mirrors() {
+        let daemon = json!({"log-level": "warn"}).as_object().cloned().unwrap();
+
+        let config = compose(
+            &daemon,
+            &Proxy::default(),
+            &["https://mirror.corp".to_owned()],
+            String::new(),
+        );
 
         assert_eq!(
             Value::Object(config.daemon),
-            json!({"registry-mirrors": ["https://mirror.corp"]})
+            json!({"log-level": "warn", "registry-mirrors": ["https://mirror.corp"]})
         );
     }
 
@@ -147,7 +159,7 @@ mod tests {
             exclude: vec![".corp".to_owned()],
         };
 
-        let config = compose(&proxy, &[], "PEM".to_owned());
+        let config = compose(&Map::new(), &proxy, &[], "PEM".to_owned());
 
         assert_eq!(
             Value::Object(config.daemon),

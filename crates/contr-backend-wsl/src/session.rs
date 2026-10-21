@@ -47,7 +47,7 @@ impl Session {
         shared_pipes: &[String],
         integrations: &Integrations,
     ) -> io::Result<Self> {
-        wsl::configure(runtime, config).await?;
+        wsl::configure(runtime, config, wsl::Configure::Apply).await?;
         let mut background = Vec::new();
 
         let mut anchor = wsl::spawn(data, &[guest::AGENT_PATH, "data-anchor"])?;
