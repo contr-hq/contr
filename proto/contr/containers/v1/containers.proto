@@ -30,7 +30,9 @@ service ContainersService {
   // Streams the latest sample of every running container about every two seconds, for lists that show each
   // container's usage; it shares its samples with EngineService.StreamUsage.
   rpc WatchContainerStats(WatchContainerStatsRequest) returns (stream WatchContainerStatsResponse);
-  // Runs a command in a running container and relays its input and output.
+  // Runs a command in a running container and relays its input and output. When the client's stream ends, the
+  // command's stdin closes: a command without a terminal sees end of input, and one with a terminal keeps running, as
+  // with the Docker CLI. To end a terminal shell, send stdin 0x04 (Ctrl-D) at its prompt before closing.
   rpc Exec(stream ExecRequest) returns (stream ExecResponse);
   // Creates a container from a local image and, when asked, starts it; fails with NOT_FOUND when the image is not
   // local. On Windows, bind sources are Windows paths. A container that cannot start is removed and the call fails.

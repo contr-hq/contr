@@ -1111,7 +1111,9 @@ pub mod containers_service_client {
                 );
             self.inner.server_streaming(req, path, codec).await
         }
-        /// Runs a command in a running container and relays its input and output.
+        /// Runs a command in a running container and relays its input and output. When the client's stream ends, the
+        /// command's stdin closes: a command without a terminal sees end of input, and one with a terminal keeps running, as
+        /// with the Docker CLI. To end a terminal shell, send stdin 0x04 (Ctrl-D) at its prompt before closing.
         pub async fn exec(
             &mut self,
             request: impl tonic::IntoStreamingRequest<Message = super::ExecRequest>,
@@ -1446,7 +1448,9 @@ pub mod containers_service_server {
             >
             + std::marker::Send
             + 'static;
-        /// Runs a command in a running container and relays its input and output.
+        /// Runs a command in a running container and relays its input and output. When the client's stream ends, the
+        /// command's stdin closes: a command without a terminal sees end of input, and one with a terminal keeps running, as
+        /// with the Docker CLI. To end a terminal shell, send stdin 0x04 (Ctrl-D) at its prompt before closing.
         async fn exec(
             &self,
             request: tonic::Request<tonic::Streaming<super::ExecRequest>>,
