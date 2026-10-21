@@ -4,6 +4,7 @@ mod cli_tools;
 mod doctor;
 mod exec;
 mod format;
+mod settings;
 mod wsl;
 
 use std::process::ExitCode;
@@ -50,6 +51,11 @@ enum Command {
     /// Show or install the Docker CLI tools the daemon bundles.
     #[command(subcommand)]
     Cli(cli_tools::CliCommand),
+    /// Show or change your settings.
+    Settings {
+        #[command(subcommand)]
+        command: Option<settings::SettingsCommand>,
+    },
     /// Check what keeps the engine or its features from working.
     Doctor,
     /// Run a fix that `doctor` offers.
@@ -91,6 +97,7 @@ async fn run(command: Command) -> anyhow::Result<i32> {
         Command::Exec(args) => exec::run(&Client::connect_default(&identity).await?, args).await,
         Command::Cli(command) => cli_tools::run(&Client::connect_or_start(&identity).await?, command).await,
         Command::Wsl(command) => wsl::run(&Client::connect_or_start(&identity).await?, command).await,
+        Command::Settings { command } => settings::run(&Client::connect_or_start(&identity).await?, command).await,
         Command::Doctor => doctor::doctor(&Client::connect_or_start(&identity).await?).await,
         Command::Fix { action_id } => doctor::fix(&Client::connect_or_start(&identity).await?, action_id).await,
     }
