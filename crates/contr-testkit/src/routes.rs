@@ -22,6 +22,8 @@ pub(crate) type Body = UnsyncBoxBody<Bytes, Infallible>;
 
 const API_VERSION: &str = "1.51";
 const STATS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+/// How often a followed log of a running container gains a line.
+const LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 const FAKE_CPUS: u64 = 4;
 const FAKE_MEMORY: u64 = 8_589_934_592;
 const EVENT_QUEUE: usize = 256;
@@ -99,6 +101,7 @@ pub(crate) async fn route(engine: Arc<Engine>, request: Request<Incoming>) -> Re
         (&Method::GET, ["events"]) => events(&engine, query.get("since").and_then(|since| since.parse().ok())),
         (&Method::GET, ["containers", "json"]) => list_containers(&engine, &query),
         (&Method::GET, ["containers", id, "json"]) => inspect_container(&engine, id),
+        (&Method::GET, ["containers", id, "logs"]) => logs(&engine, id, &query),
         (&Method::GET, ["containers", id, "stats"]) => stats(
             &engine,
             id,
@@ -261,6 +264,70 @@ fn inspect_container(engine: &Engine, reference: &str) -> Response<Body> {
         },
         "Mounts": container.get("Mounts").cloned().unwrap_or_else(|| json!([])),
     }))
+}
+
+/// A short log for every container in the engine's multiplexed stream format: two stdout lines and one stderr line,
+/// then, when followed while the container runs, a stdout line every [`LOG_INTERVAL`].
+fn logs(engine: &Engine, reference: &str, query: &HashMap<String, String>) -> Response<Body> {
+    let (name, running) = {
+        let store = engine.store();
+        let Some(container) = find_container(&store.containers, reference) else {
+            return no_such_container(reference);
+        };
+        (
+            container["Names"][0]
+                .as_str()
+                .unwrap_or_default()
+                .trim_start_matches('/')
+                .to_owned(),
+            container["State"] == "running",
+        )
+    };
+    let (stdout, stderr, timestamps) = (flag(query, "stdout"), flag(query, "stderr"), flag(query, "timestamps"));
+    let frame = move |stream: u8, line: &str| {
+        let text = if timestamps {
+            format!("{} {line}\n", rfc3339(unix_now()))
+        } else {
+            format!("{line}\n")
+        };
+        let mut frame = vec![stream, 0, 0, 0];
+        frame.extend_from_slice(&u32::try_from(text.len()).unwrap_or(u32::MAX).to_be_bytes());
+        frame.extend_from_slice(text.as_bytes());
+        Bytes::from(frame)
+    };
+
+    let mut lines = vec![
+        (1, format!("{name} is starting")),
+        (2, format!("{name} found no configuration file; using defaults")),
+        (1, format!("{name} is ready")),
+    ];
+    lines.retain(|(stream, _)| if *stream == 1 { stdout } else { stderr });
+    if let Some(tail) = query.get("tail").and_then(|tail| tail.parse::<usize>().ok()) {
+        lines.drain(..lines.len().saturating_sub(tail));
+    }
+    let existing: Vec<Result<Frame<Bytes>, Infallible>> = lines
+        .iter()
+        .map(|(stream, line)| Ok(Frame::data(frame(*stream, line))))
+        .collect();
+    let followed = futures_util::stream::unfold(1_u64, move |tick| {
+        let line = frame(1, &format!("{name} handled request {tick}"));
+        async move {
+            tokio::time::sleep(LOG_INTERVAL).await;
+            Some((Ok(Frame::data(line)), tick + 1))
+        }
+    })
+    .take_while(move |_| std::future::ready(stdout));
+    let frames = futures_util::stream::iter(existing);
+    let body = if flag(query, "follow") && running {
+        BodyExt::boxed_unsync(StreamBody::new(frames.chain(followed)))
+    } else {
+        BodyExt::boxed_unsync(StreamBody::new(frames))
+    };
+
+    Response::builder()
+        .header(header::CONTENT_TYPE, "application/vnd.docker.multiplexed-stream")
+        .body(body)
+        .unwrap_or_default()
 }
 
 /// Samples in which a running container uses a quarter of one CPU and 50 MiB, one per second while `stream` is set.
