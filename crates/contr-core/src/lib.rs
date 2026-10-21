@@ -6,5 +6,6 @@ mod error;
 pub mod guest;
 pub mod paths;
 pub mod product;
+pub mod proxy;
 
 pub use error::{ErrorReason, Remediation};
