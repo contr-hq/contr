@@ -12,3 +12,4 @@ Each record states Context → Decision → Consequences. A superseded record st
 | [0006](0006-product-identity.md) | Product-derived names come from one module |
 | [0007](0007-wsl-distribution-integration.md) | The user's WSL distributions reach the engine through a relayed socket and a shared root mount |
 | [0008](0008-windows-packages-carry-every-runtime.md) | Windows packages carry every runtime |
+| [0009](0009-proxy-variables-from-the-engine-proxy.md) | Containers and builds receive the engine's proxy from the engine proxy |
