@@ -12,8 +12,8 @@ use tokio::process::Command;
 
 /// Docker's tool that sets up a rootless engine for the user who runs it.
 const ROOTLESS_SETUP_TOOL: &str = "dockerd-rootless-setuptool.sh";
-/// pkexec's exit codes when the user dismissed its prompt or is not allowed.
-const PKEXEC_REFUSED: [i32; 2] = [126, 127];
+/// pkexec's exit code when the user dismissed its password prompt.
+const PKEXEC_DISMISSED: i32 = 126;
 /// Lines of a failed command's standard error kept for its error message.
 const KEPT_ERROR_LINES: usize = 20;
 
@@ -57,11 +57,7 @@ async fn run_helper(operation: &str, progress: &dyn ProgressSink) -> Result<(), 
     command.arg(helper).arg(operation);
 
     match stream(command, progress).await {
-        Err(Failure::Exited(code, _)) if PKEXEC_REFUSED.contains(&code) => Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "the password prompt was dismissed or refused",
-        )
-        .into()),
+        Err(Failure::Exited(PKEXEC_DISMISSED, _)) => Err(BackendError::Dismissed),
         Err(failure) => Err(failure.into()),
         Ok(()) => Ok(()),
     }

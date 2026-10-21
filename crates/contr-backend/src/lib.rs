@@ -150,6 +150,9 @@ pub enum BackendError {
     /// An operating-system call failed.
     #[error(transparent)]
     Io(#[from] io::Error),
+    /// The user dismissed a prompt the operation needs, so nothing changed.
+    #[error("the prompt was dismissed")]
+    Dismissed,
 }
 
 /// Platform runtime the daemon provisions, starts and stops.

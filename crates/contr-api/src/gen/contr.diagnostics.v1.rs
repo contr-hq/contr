@@ -205,8 +205,8 @@ pub mod diagnostics_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /// Runs a remediation that a check, a blocker or an error offered; fails with NOT_FOUND for an action this backend
-        /// does not offer. Cancelling the call does not cancel the action.
+        /// Runs a remediation that a check, a blocker or an error offered. Fails with NOT_FOUND for an action this backend
+        /// does not offer and CANCELLED when the user dismisses its prompt; cancelling the call never stops the action.
         pub async fn run_remediation(
             &mut self,
             request: impl tonic::IntoRequest<super::RunRemediationRequest>,
@@ -266,8 +266,8 @@ pub mod diagnostics_service_server {
             >
             + std::marker::Send
             + 'static;
-        /// Runs a remediation that a check, a blocker or an error offered; fails with NOT_FOUND for an action this backend
-        /// does not offer. Cancelling the call does not cancel the action.
+        /// Runs a remediation that a check, a blocker or an error offered. Fails with NOT_FOUND for an action this backend
+        /// does not offer and CANCELLED when the user dismisses its prompt; cancelling the call never stops the action.
         async fn run_remediation(
             &self,
             request: tonic::Request<super::RunRemediationRequest>,
