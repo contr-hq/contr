@@ -17,7 +17,9 @@ generator. The desktop clients live in their own repositories and talk to the da
 ## Status
 
 - Linux: `contrd` manages a Docker Engine or Podman installed on the host and serves the gRPC API on a per-user
-  socket. The `contr` CLI, the Rust SDK and the generated C# SDK talk to it.
+  socket. The `contr` CLI, the Rust SDK and the generated C# SDK talk to it. Without an engine, `contr fix
+  install-engine` installs the distribution's own engine behind one password prompt. Releases carry the
+  `contr-daemon` package as `.deb` and `.rpm`.
 - Windows (Phase 2, in progress): `contrd` runs Moby in two Contr-owned WSL 2 distributions and serves the engine on a
   per-user named pipe with the `contr` docker context, and on `\\.\pipe\docker_engine` when no other program
   owns it, so `docker` works without a context. Windows bind paths such as `-v C:\src:/w` work, and
@@ -50,7 +52,7 @@ settings as managed by the organization, and the daemon refuses changes to them.
 | `sdk/csharp/` | Template of the generated C# SDK, its conformance program and samples |
 | `guest/` | Root filesystems of the WSL distributions, built by `cargo xtask guest` |
 | `packaging/windows/` | Docker CLI tools bundled for Windows, fetched by `cargo xtask windows-cli` |
-| `packaging/linux/` | systemd user units for socket activation |
+| `packaging/linux/` | systemd user units, the polkit policy, and the Debian and RPM packages built by `cargo xtask package-linux` |
 | `specs/` | Clean-room specifications |
 | `docs/adr/` | Architecture decisions |
 
