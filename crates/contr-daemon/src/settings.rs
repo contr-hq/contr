@@ -3,8 +3,8 @@
 
 use std::path::PathBuf;
 
-use contr_backend::{Backend, BackendSettings};
-use contr_settings::{Effective, Settings, SettingsError, SettingsFile};
+use contr_backend::{Backend, BackendSettings, EngineSettings, ProxyChoice};
+use contr_settings::{Effective, ProxyMode, Settings, SettingsError, SettingsFile};
 use serde_json::{Map, Value};
 use tokio::sync::{Mutex, watch};
 use tonic::Status;
@@ -58,9 +58,19 @@ impl SettingsHub {
 
     /// What the backend applies itself from the current settings.
     pub(crate) fn backend_settings(&self) -> BackendSettings {
+        let configured = &self.current.borrow().effective.configured;
+
         BackendSettings {
-            serve_default_endpoint: self.default_endpoint_allowed
-                && self.current.borrow().effective.configured.engine.serve_default_pipe,
+            serve_default_endpoint: self.default_endpoint_allowed && configured.engine.serve_default_pipe,
+            engine: EngineSettings {
+                proxy: match configured.proxy.mode {
+                    ProxyMode::System => ProxyChoice::System,
+                    ProxyMode::Manual => ProxyChoice::Manual(configured.proxy.manual()),
+                    ProxyMode::None => ProxyChoice::Direct,
+                },
+                trust_system_certificates: configured.certificates.trust_system,
+                registry_mirrors: configured.registry.mirrors.clone(),
+            },
         }
     }
 

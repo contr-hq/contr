@@ -1,6 +1,7 @@
 use clap::Subcommand;
 use contr_sdk::api::settings::v1::{
-    EngineSettings, GetSettingsRequest, ResetSettingsRequest, Settings, SettingsState, UpdateSettingsRequest,
+    CertificateSettings, EngineSettings, GetSettingsRequest, ProxyMode, ProxySettings, RegistrySettings,
+    ResetSettingsRequest, Settings, SettingsState, UpdateSettingsRequest,
 };
 use contr_sdk::{Client, Error};
 
@@ -10,7 +11,7 @@ use crate::format;
 pub(crate) enum SettingsCommand {
     /// Show every setting and which ones your organization manages.
     Show,
-    /// Change one setting, such as `engine.start_with_daemon true`.
+    /// Change one setting, such as `engine.start_with_daemon true` or `registry.mirrors https://a,https://b`.
     Set { path: String, value: String },
     /// Return every setting you changed to its default.
     Reset,
@@ -63,26 +64,90 @@ fn with_value(path: &str, value: &str) -> anyhow::Result<Settings> {
         "false" | "off" | "no" => Ok(false),
         _ => anyhow::bail!("{path} is true or false, not {value:?}"),
     };
-    let engine = match path {
-        "engine.start_with_daemon" => EngineSettings {
-            start_with_daemon: flag()?,
-            ..Default::default()
-        },
-        "engine.serve_default_pipe" => EngineSettings {
-            serve_default_pipe: flag()?,
-            ..Default::default()
-        },
+    let mut settings = Settings::default();
+    match path {
+        "engine.start_with_daemon" => {
+            settings.engine = Some(EngineSettings {
+                start_with_daemon: flag()?,
+                ..Default::default()
+            });
+        }
+        "engine.serve_default_pipe" => {
+            settings.engine = Some(EngineSettings {
+                serve_default_pipe: flag()?,
+                ..Default::default()
+            });
+        }
+        "proxy.mode" => {
+            let mode = PROXY_MODES
+                .iter()
+                .find(|(name, _)| *name == value)
+                .map(|(_, mode)| *mode)
+                .ok_or_else(|| anyhow::anyhow!("proxy.mode is system, manual or none, not {value:?}"))?;
+            settings.proxy = Some(ProxySettings {
+                mode: mode.into(),
+                ..Default::default()
+            });
+        }
+        "proxy.http" | "proxy.https" | "proxy.exclude" => {
+            let mut proxy = ProxySettings::default();
+            match path {
+                "proxy.http" => &mut proxy.http,
+                "proxy.https" => &mut proxy.https,
+                _ => &mut proxy.exclude,
+            }
+            .push_str(value);
+            settings.proxy = Some(proxy);
+        }
+        "certificates.trust_system" => {
+            settings.certificates = Some(CertificateSettings { trust_system: flag()? });
+        }
+        "registry.mirrors" => {
+            settings.registry = Some(RegistrySettings {
+                mirrors: value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|mirror| !mirror.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+            });
+        }
         _ => anyhow::bail!("{path} is not a setting"),
-    };
+    }
 
-    Ok(Settings { engine: Some(engine) })
+    Ok(settings)
 }
 
+/// Names `contr settings set proxy.mode` takes.
+const PROXY_MODES: [(&str, ProxyMode); 3] = [
+    ("system", ProxyMode::System),
+    ("manual", ProxyMode::Manual),
+    ("none", ProxyMode::None),
+];
+
 fn print(state: &SettingsState) {
-    let engine = state.settings.unwrap_or_default().engine.unwrap_or_default();
+    let settings = state.settings.clone().unwrap_or_default();
+    let engine = settings.engine.unwrap_or_default();
+    let proxy = settings.proxy.unwrap_or_default();
+    let mode = PROXY_MODES
+        .iter()
+        .find(|(_, mode)| *mode == proxy.mode())
+        .map_or("system", |(name, _)| name);
     let rows: Vec<Vec<String>> = [
-        ("engine.start_with_daemon", engine.start_with_daemon),
-        ("engine.serve_default_pipe", engine.serve_default_pipe),
+        ("engine.start_with_daemon", engine.start_with_daemon.to_string()),
+        ("engine.serve_default_pipe", engine.serve_default_pipe.to_string()),
+        ("proxy.mode", mode.to_owned()),
+        ("proxy.http", proxy.http),
+        ("proxy.https", proxy.https),
+        ("proxy.exclude", proxy.exclude),
+        (
+            "certificates.trust_system",
+            settings.certificates.unwrap_or_default().trust_system.to_string(),
+        ),
+        (
+            "registry.mirrors",
+            settings.registry.unwrap_or_default().mirrors.join(","),
+        ),
     ]
     .into_iter()
     .map(|(path, value)| {
@@ -91,7 +156,7 @@ fn print(state: &SettingsState) {
         } else {
             ""
         };
-        vec![path.to_owned(), value.to_string(), note.to_owned()]
+        vec![path.to_owned(), value, note.to_owned()]
     })
     .collect();
 

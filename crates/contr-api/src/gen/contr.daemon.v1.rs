@@ -112,6 +112,8 @@ pub enum Capability {
     HostPortForwarding = 5,
     /// EngineService.Reset is available.
     Reset = 6,
+    /// The engine applies the proxy, certificate and registry settings.
+    EngineConfiguration = 7,
 }
 impl Capability {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -127,6 +129,7 @@ impl Capability {
             Self::WslIntegration => "CAPABILITY_WSL_INTEGRATION",
             Self::HostPortForwarding => "CAPABILITY_HOST_PORT_FORWARDING",
             Self::Reset => "CAPABILITY_RESET",
+            Self::EngineConfiguration => "CAPABILITY_ENGINE_CONFIGURATION",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -139,6 +142,7 @@ impl Capability {
             "CAPABILITY_WSL_INTEGRATION" => Some(Self::WslIntegration),
             "CAPABILITY_HOST_PORT_FORWARDING" => Some(Self::HostPortForwarding),
             "CAPABILITY_RESET" => Some(Self::Reset),
+            "CAPABILITY_ENGINE_CONFIGURATION" => Some(Self::EngineConfiguration),
             _ => None,
         }
     }

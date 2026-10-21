@@ -3,7 +3,7 @@ use std::sync::Arc;
 use contr_api::settings::v1 as proto;
 use contr_api::settings::v1::settings_service_server::SettingsService;
 use contr_backend::EngineState;
-use contr_settings::Configured;
+use contr_settings::{Configured, ProxyMode};
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 use tokio_stream::wrappers::WatchStream;
@@ -14,7 +14,15 @@ use crate::settings::Snapshot;
 use crate::status;
 
 /// Paths whose change applies at the next engine start.
-const ENGINE_RESTART_PATHS: [&str; 1] = ["engine.serve_default_pipe"];
+const ENGINE_RESTART_PATHS: [&str; 7] = [
+    "engine.serve_default_pipe",
+    "proxy.mode",
+    "proxy.http",
+    "proxy.https",
+    "proxy.exclude",
+    "certificates.trust_system",
+    "registry.mirrors",
+];
 
 pub(crate) struct SettingsApi(pub(crate) Arc<Shared>);
 
@@ -53,9 +61,7 @@ impl SettingsService for SettingsApi {
         let paths = request.update_mask.map(|mask| mask.paths).unwrap_or_default();
         let mut values = Vec::with_capacity(paths.len());
         for path in &paths {
-            let value =
-                value(settings, path).ok_or_else(|| Status::invalid_argument(format!("{path} is not a setting")))?;
-            values.push((path.as_str(), value));
+            values.push((path.as_str(), value(&settings, path)?));
         }
         let locked = self.0.settings.snapshot().effective.locked;
         if let Some((path, _)) = values.iter().find(|(path, _)| locked.contains(path)) {
@@ -137,20 +143,51 @@ fn state(snapshot: &Snapshot) -> proto::SettingsState {
 }
 
 fn settings(configured: &Configured) -> proto::Settings {
+    let proxy = &configured.proxy;
+
     proto::Settings {
         engine: Some(proto::EngineSettings {
             start_with_daemon: configured.engine.start_with_daemon,
             serve_default_pipe: configured.engine.serve_default_pipe,
         }),
+        proxy: Some(proto::ProxySettings {
+            mode: match proxy.mode {
+                ProxyMode::System => proto::ProxyMode::System,
+                ProxyMode::Manual => proto::ProxyMode::Manual,
+                ProxyMode::None => proto::ProxyMode::None,
+            }
+            .into(),
+            http: proxy.http.clone(),
+            https: proxy.https.clone(),
+            exclude: proxy.exclude.clone(),
+        }),
+        certificates: Some(proto::CertificateSettings {
+            trust_system: configured.certificates.trust_system,
+        }),
+        registry: Some(proto::RegistrySettings {
+            mirrors: configured.registry.mirrors.clone(),
+        }),
     }
 }
 
-/// The value `settings` holds at `path`, or `None` for a path that names no setting.
-fn value(settings: proto::Settings, path: &str) -> Option<Value> {
+/// The value `settings` holds at `path`, as the settings file stores it.
+fn value(settings: &proto::Settings, path: &str) -> Result<Value, Status> {
     let engine = settings.engine.unwrap_or_default();
-    match path {
-        "engine.start_with_daemon" => Some(json!(engine.start_with_daemon)),
-        "engine.serve_default_pipe" => Some(json!(engine.serve_default_pipe)),
-        _ => None,
-    }
+    let proxy = settings.proxy.clone().unwrap_or_default();
+    Ok(match path {
+        "engine.start_with_daemon" => json!(engine.start_with_daemon),
+        "engine.serve_default_pipe" => json!(engine.serve_default_pipe),
+        "proxy.mode" => json!(match proxy.mode() {
+            proto::ProxyMode::System => ProxyMode::System,
+            proto::ProxyMode::Manual => ProxyMode::Manual,
+            proto::ProxyMode::None => ProxyMode::None,
+            proto::ProxyMode::Unspecified => return Err(Status::invalid_argument("proxy.mode names no mode")),
+        }),
+        "proxy.http" => json!(proxy.http),
+        "proxy.https" => json!(proxy.https),
+        "proxy.exclude" => json!(proxy.exclude),
+        "certificates.trust_system" => json!(settings.certificates.unwrap_or_default().trust_system),
+        "registry.mirrors" => json!(settings.registry.clone().unwrap_or_default().mirrors),
+        _ => return Err(Status::invalid_argument(format!("{path} is not a setting"))),
+    })
 }
