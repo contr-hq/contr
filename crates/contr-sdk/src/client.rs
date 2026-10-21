@@ -12,6 +12,7 @@ use contr_api::engine::v1::{WatchStateRequest, WatchStateResponse};
 use contr_api::images::v1::images_service_client::ImagesServiceClient;
 use contr_api::integration::v1::integration_service_client::IntegrationServiceClient;
 use contr_api::networks::v1::networks_service_client::NetworksServiceClient;
+use contr_api::settings::v1::settings_service_client::SettingsServiceClient;
 use contr_api::volumes::v1::volumes_service_client::VolumesServiceClient;
 use contr_core::product;
 use contr_transport::Endpoint;
@@ -120,6 +121,11 @@ impl Client {
     /// Checks of what keeps the engine from working, and the fixes the daemon runs.
     pub fn diagnostics(&self) -> DiagnosticsServiceClient<Channel> {
         DiagnosticsServiceClient::new(self.channel.clone())
+    }
+
+    /// The user's settings and the ones an administrator fixes.
+    pub fn settings(&self) -> SettingsServiceClient<Channel> {
+        SettingsServiceClient::new(self.channel.clone())
     }
 
     /// Volumes service.

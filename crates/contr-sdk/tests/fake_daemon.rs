@@ -18,6 +18,9 @@ use contr_sdk::api::engine::v1::{
 };
 use contr_sdk::api::images::v1::InspectImageRequest;
 use contr_sdk::api::networks::v1::{CheckHostPortsRequest, HostPort};
+use contr_sdk::api::settings::v1::{
+    EngineSettings, GetSettingsRequest, ResetSettingsRequest, Settings, UpdateSettingsRequest,
+};
 use contr_sdk::{Client, ClientIdentity, Endpoint, Error};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -28,17 +31,19 @@ struct Daemon {
     endpoint: Endpoint,
     shutdown: Option<oneshot::Sender<()>>,
     task: JoinHandle<Result<(), contr_daemon::DaemonError>>,
-    #[cfg(unix)]
-    _dir: tempfile::TempDir,
+    dir: tempfile::TempDir,
 }
 
 impl Daemon {
     fn start() -> Self {
+        Self::start_in(tempfile::tempdir().unwrap())
+    }
+
+    /// Daemon whose settings and administrator's settings are `settings.json` and `admin-settings.json` in `dir`.
+    fn start_in(dir: tempfile::TempDir) -> Self {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let instance = NEXT.fetch_add(1, Ordering::Relaxed);
 
-        #[cfg(unix)]
-        let dir = tempfile::tempdir().unwrap();
         #[cfg(unix)]
         let endpoint = Endpoint::Unix(dir.path().join("run").join("contrd.sock"));
         #[cfg(windows)]
@@ -55,6 +60,8 @@ impl Daemon {
             default_pipe: false,
             cli_dir: None,
             docker_context: false,
+            settings_file: Some(dir.path().join("settings.json")),
+            admin_settings: Some(dir.path().join("admin-settings.json")),
         };
         let (shutdown, signal) = oneshot::channel();
         let task = tokio::spawn(contr_daemon::run(config, async {
@@ -65,8 +72,7 @@ impl Daemon {
             endpoint,
             shutdown: Some(shutdown),
             task,
-            #[cfg(unix)]
-            _dir: dir,
+            dir,
         }
     }
 
@@ -81,6 +87,13 @@ impl Daemon {
                 Err(error) => panic!("cannot connect: {error}"),
             }
         }
+    }
+
+    /// Stops the daemon and hands back its directory, so another daemon can start with the same settings.
+    async fn stop_keeping_dir(mut self) -> tempfile::TempDir {
+        let _ = self.shutdown.take().unwrap().send(());
+        (&mut self.task).await.unwrap().unwrap();
+        self.dir
     }
 
     async fn stop(mut self) {
@@ -521,6 +534,117 @@ async fn host_ports_are_checked_while_the_engine_is_stopped() {
     assert!(statuses[0].in_use);
     assert!(!statuses[1].in_use);
     assert_eq!(statuses[1].port.unwrap().port, free_port);
+
+    daemon.stop().await;
+}
+
+fn engine_update(start_with_daemon: bool, etag: &str) -> UpdateSettingsRequest {
+    UpdateSettingsRequest {
+        settings: Some(Settings {
+            engine: Some(EngineSettings {
+                start_with_daemon,
+                serve_default_pipe: false,
+            }),
+        }),
+        update_mask: Some(prost_types::FieldMask {
+            paths: vec!["engine.start_with_daemon".to_owned()],
+        }),
+        etag: etag.to_owned(),
+    }
+}
+
+#[tokio::test]
+async fn settings_persist_and_start_the_engine_with_the_daemon() {
+    let dir = tempfile::tempdir().unwrap();
+    let settings_file = dir.path().join("settings.json");
+    let daemon = Daemon::start_in(dir);
+    let client = daemon.client().await;
+
+    let initial = client
+        .settings()
+        .get_settings(GetSettingsRequest {})
+        .await
+        .unwrap()
+        .into_inner()
+        .state
+        .unwrap();
+    let engine = initial.settings.unwrap().engine.unwrap();
+    assert!(!engine.start_with_daemon);
+    assert!(engine.serve_default_pipe);
+
+    let updated = client
+        .settings()
+        .update_settings(engine_update(true, &initial.etag))
+        .await
+        .unwrap()
+        .into_inner()
+        .state
+        .unwrap();
+    let engine = updated.settings.unwrap().engine.unwrap();
+    assert!(engine.start_with_daemon);
+    assert!(engine.serve_default_pipe, "only the masked path changes");
+
+    let stale = client
+        .settings()
+        .update_settings(engine_update(false, &initial.etag))
+        .await
+        .unwrap_err();
+    assert_eq!(stale.code(), tonic::Code::Aborted);
+    let written = std::fs::read_to_string(&settings_file).unwrap();
+    assert!(written.contains("\"startWithDaemon\": true"), "{written}");
+
+    let dir = daemon.stop_keeping_dir().await;
+    let daemon = Daemon::start_in(dir);
+    let client = daemon.client().await;
+    let deadline = tokio::time::Instant::now() + STARTUP_TIMEOUT;
+    while client.engine_state().await.unwrap().state() != EngineState::Running {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the engine did not start with the daemon"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let reset = client
+        .settings()
+        .reset_settings(ResetSettingsRequest {})
+        .await
+        .unwrap()
+        .into_inner()
+        .state
+        .unwrap();
+    assert!(!reset.settings.unwrap().engine.unwrap().start_with_daemon);
+
+    daemon.stop().await;
+}
+
+#[tokio::test]
+async fn administrators_lock_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("admin-settings.json"),
+        r#"{"engine": {"startWithDaemon": false}}"#,
+    )
+    .unwrap();
+    let daemon = Daemon::start_in(dir);
+    let client = daemon.client().await;
+
+    let state = client
+        .settings()
+        .get_settings(GetSettingsRequest {})
+        .await
+        .unwrap()
+        .into_inner()
+        .state
+        .unwrap();
+    assert_eq!(state.locked_paths, ["engine.start_with_daemon"]);
+
+    let refused = client
+        .settings()
+        .update_settings(engine_update(true, ""))
+        .await
+        .unwrap_err();
+    assert!(matches!(Error::from(refused), Error::SettingLocked(_)));
 
     daemon.stop().await;
 }

@@ -6,8 +6,6 @@ use contr_api::integration::v1 as proto;
 use contr_api::integration::v1::integration_service_server::IntegrationService;
 use contr_backend::{IntegrationState, WslDistribution, WslIntegration};
 use contr_platform::cli_tools::{Bundle, Installation};
-use contr_settings::{SettingsError, SettingsFile};
-use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
 use super::Shared;
@@ -20,10 +18,9 @@ pub(crate) struct CliLocations {
     pub(crate) installation: Installation,
 }
 
-/// Engine access from the user's WSL distributions and the settings file that keeps it across restarts.
+/// Engine access from the user's WSL distributions; the user's settings keep it across restarts.
 pub(crate) struct WslAccess {
     pub(crate) integration: Arc<dyn WslIntegration>,
-    pub(crate) settings: Mutex<SettingsFile>,
 }
 
 pub(crate) struct IntegrationApi(pub(crate) Arc<Shared>);
@@ -73,7 +70,7 @@ impl IntegrationService for IntegrationApi {
             )));
         }
 
-        remember(wsl, &distribution.name, request.enabled).await?;
+        self.remember(&distribution.name, request.enabled).await?;
         wsl.integration
             .set_integrated(&distribution.name, request.enabled)
             .await;
@@ -85,6 +82,21 @@ impl IntegrationService for IntegrationApi {
 }
 
 impl IntegrationApi {
+    async fn remember(&self, name: &str, integrated: bool) -> Result<(), Status> {
+        self.0
+            .settings
+            .update(None, self.0.backend.as_ref(), |stored| {
+                Ok(if integrated {
+                    stored.wsl_integrations.insert(name.to_owned())
+                } else {
+                    stored.wsl_integrations.remove(name)
+                })
+            })
+            .await?;
+
+        Ok(())
+    }
+
     fn wsl(&self) -> Result<&WslAccess, Status> {
         self.0
             .wsl
@@ -120,28 +132,6 @@ async fn registered(wsl: &WslAccess, name: &str) -> Result<WslDistribution, Stat
         .into_iter()
         .find(|distribution| distribution.name.eq_ignore_ascii_case(name))
         .ok_or_else(|| Status::not_found(format!("no WSL distribution named {name:?} is registered")))
-}
-
-async fn remember(wsl: &WslAccess, name: &str, integrated: bool) -> Result<(), Status> {
-    let file = wsl.settings.lock().await;
-    let mut settings = file.load().map_err(|error| settings_unusable(&error))?;
-    let changed = if integrated {
-        settings.wsl_integrations.insert(name.to_owned())
-    } else {
-        settings.wsl_integrations.remove(name)
-    };
-    if changed {
-        file.save(&settings).map_err(|error| settings_unusable(&error))?;
-    }
-
-    Ok(())
-}
-
-fn settings_unusable(error: &SettingsError) -> Status {
-    match std::error::Error::source(error) {
-        Some(cause) => Status::internal(format!("{error}: {cause}")),
-        None => Status::internal(error.to_string()),
-    }
 }
 
 fn wsl_distribution(distribution: WslDistribution) -> proto::WslDistribution {
