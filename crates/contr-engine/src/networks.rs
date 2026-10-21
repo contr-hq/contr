@@ -1,4 +1,6 @@
-use bollard::models::{Ipam, IpamConfig, NetworkCreateRequest};
+use bollard::models::{
+    EndpointSettings, Ipam, IpamConfig, NetworkConnectRequest, NetworkCreateRequest, NetworkDisconnectRequest,
+};
 use bollard::query_parameters::{InspectNetworkOptions, ListNetworksOptions, PruneNetworksOptions};
 use contr_api::networks::v1::{CreateNetworkRequest, InspectNetworkResponse, Network, PruneNetworksResponse};
 
@@ -66,6 +68,28 @@ impl Engine {
 
     pub async fn remove_network(&self, reference: &str) -> Result<(), EngineError> {
         Ok(self.docker().remove_network(reference).await?)
+    }
+
+    /// Connects `container` to `network`, where it also answers to `aliases`.
+    pub async fn connect_network(&self, network: &str, container: &str, aliases: &[String]) -> Result<(), EngineError> {
+        let config = NetworkConnectRequest {
+            container: container.to_owned(),
+            endpoint_config: (!aliases.is_empty()).then(|| EndpointSettings {
+                aliases: Some(aliases.to_vec()),
+                ..Default::default()
+            }),
+        };
+
+        Ok(self.docker().connect_network(network, config).await?)
+    }
+
+    pub async fn disconnect_network(&self, network: &str, container: &str, force: bool) -> Result<(), EngineError> {
+        let config = NetworkDisconnectRequest {
+            container: container.to_owned(),
+            force: Some(force),
+        };
+
+        Ok(self.docker().disconnect_network(network, config).await?)
     }
 
     /// Deletes user-defined networks no container is connected to.

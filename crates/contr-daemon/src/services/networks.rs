@@ -89,6 +89,38 @@ impl NetworksService for NetworksApi {
         Ok(Response::new(proto::RemoveNetworkResponse {}))
     }
 
+    async fn connect_network(
+        &self,
+        request: Request<proto::ConnectNetworkRequest>,
+    ) -> Result<Response<proto::ConnectNetworkResponse>, Status> {
+        let request = request.into_inner();
+        let handle = self.0.slot.get().await?;
+        handle
+            .engine
+            .connect_network(&request.network, &request.container, &request.aliases)
+            .await
+            .map_err(status::from_engine)?;
+        handle.cache.refresh_networks().await;
+
+        Ok(Response::new(proto::ConnectNetworkResponse {}))
+    }
+
+    async fn disconnect_network(
+        &self,
+        request: Request<proto::DisconnectNetworkRequest>,
+    ) -> Result<Response<proto::DisconnectNetworkResponse>, Status> {
+        let request = request.into_inner();
+        let handle = self.0.slot.get().await?;
+        handle
+            .engine
+            .disconnect_network(&request.network, &request.container, request.force)
+            .await
+            .map_err(status::from_engine)?;
+        handle.cache.refresh_networks().await;
+
+        Ok(Response::new(proto::DisconnectNetworkResponse {}))
+    }
+
     async fn prune_networks(
         &self,
         _: Request<proto::PruneNetworksRequest>,

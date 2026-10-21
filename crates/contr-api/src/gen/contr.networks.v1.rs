@@ -116,6 +116,32 @@ pub struct RemoveNetworkRequest {
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RemoveNetworkResponse {}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ConnectNetworkRequest {
+    #[prost(string, tag = "1")]
+    pub network: ::prost::alloc::string::String,
+    /// Container ID, unique ID prefix or name.
+    #[prost(string, tag = "2")]
+    pub container: ::prost::alloc::string::String,
+    /// Further names the container answers to on this network.
+    #[prost(string, repeated, tag = "3")]
+    pub aliases: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ConnectNetworkResponse {}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DisconnectNetworkRequest {
+    #[prost(string, tag = "1")]
+    pub network: ::prost::alloc::string::String,
+    /// Container ID, unique ID prefix or name.
+    #[prost(string, tag = "2")]
+    pub container: ::prost::alloc::string::String,
+    /// Disconnects a container the engine cannot reach cleanly, such as one that is restarting.
+    #[prost(bool, tag = "3")]
+    pub force: bool,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DisconnectNetworkResponse {}
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PruneNetworksRequest {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -431,6 +457,66 @@ pub mod networks_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /// Connects a container to a network; fails with NOT_FOUND when either does not exist.
+        pub async fn connect_network(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ConnectNetworkRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ConnectNetworkResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.networks.v1.NetworksService/ConnectNetwork",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "contr.networks.v1.NetworksService",
+                        "ConnectNetwork",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        /// Disconnects a container from a network.
+        pub async fn disconnect_network(
+            &mut self,
+            request: impl tonic::IntoRequest<super::DisconnectNetworkRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::DisconnectNetworkResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/contr.networks.v1.NetworksService/DisconnectNetwork",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "contr.networks.v1.NetworksService",
+                        "DisconnectNetwork",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
         /// Reports which of the given ports a program on this computer already holds, so clients can warn before
         /// publishing them.
         pub async fn check_host_ports(
@@ -530,6 +616,22 @@ pub mod networks_service_server {
             request: tonic::Request<super::PruneNetworksRequest>,
         ) -> std::result::Result<
             tonic::Response<super::PruneNetworksResponse>,
+            tonic::Status,
+        >;
+        /// Connects a container to a network; fails with NOT_FOUND when either does not exist.
+        async fn connect_network(
+            &self,
+            request: tonic::Request<super::ConnectNetworkRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ConnectNetworkResponse>,
+            tonic::Status,
+        >;
+        /// Disconnects a container from a network.
+        async fn disconnect_network(
+            &self,
+            request: tonic::Request<super::DisconnectNetworkRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::DisconnectNetworkResponse>,
             tonic::Status,
         >;
         /// Reports which of the given ports a program on this computer already holds, so clients can warn before
@@ -881,6 +983,98 @@ pub mod networks_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = PruneNetworksSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.networks.v1.NetworksService/ConnectNetwork" => {
+                    #[allow(non_camel_case_types)]
+                    struct ConnectNetworkSvc<T: NetworksService>(pub Arc<T>);
+                    impl<
+                        T: NetworksService,
+                    > tonic::server::UnaryService<super::ConnectNetworkRequest>
+                    for ConnectNetworkSvc<T> {
+                        type Response = super::ConnectNetworkResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ConnectNetworkRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as NetworksService>::connect_network(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ConnectNetworkSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/contr.networks.v1.NetworksService/DisconnectNetwork" => {
+                    #[allow(non_camel_case_types)]
+                    struct DisconnectNetworkSvc<T: NetworksService>(pub Arc<T>);
+                    impl<
+                        T: NetworksService,
+                    > tonic::server::UnaryService<super::DisconnectNetworkRequest>
+                    for DisconnectNetworkSvc<T> {
+                        type Response = super::DisconnectNetworkResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::DisconnectNetworkRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as NetworksService>::disconnect_network(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = DisconnectNetworkSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

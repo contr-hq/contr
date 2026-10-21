@@ -497,6 +497,7 @@ dependencies = [
  "bytes",
  "contr-api",
  "contr-backend",
+ "contr-platform",
  "contr-testkit",
  "futures-util",
  "prost-types",
