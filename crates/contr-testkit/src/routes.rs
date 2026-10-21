@@ -128,6 +128,8 @@ pub(crate) async fn route(engine: Arc<Engine>, request: Request<Incoming>) -> Re
         (&Method::DELETE, ["containers", id]) => remove_container(&engine, id, flag(&query, "force")),
         (&Method::GET, ["images", "json"]) => ok_json(&Value::from(engine.store().images.clone())),
         (&Method::GET, ["images", name @ .., "json"]) => inspect_image(&engine, &name.join("/")),
+        (&Method::POST, ["images", name @ .., "tag"]) => tag_image(&engine, &name.join("/"), &query),
+        (&Method::POST, ["images", name @ .., "push"]) => push_image(&engine, &name.join("/"), &query),
         (&Method::GET, ["volumes"]) => ok_json(&json!({ "Volumes": engine.store().volumes, "Warnings": [] })),
         (&Method::POST, ["volumes", "create"]) => match read_json(request).await {
             Ok(body) => create_volume(&engine, &body),
@@ -148,6 +150,10 @@ pub(crate) async fn route(engine: Arc<Engine>, request: Request<Incoming>) -> Re
             |network| ok_json(&network),
         ),
         (&Method::DELETE, ["networks", id]) => remove_network(&engine, id),
+        (&Method::POST, ["networks", id, action @ ("connect" | "disconnect")]) => match read_json(request).await {
+            Ok(body) => change_endpoint(&engine, id, action, &body),
+            Err(message) => error(StatusCode::BAD_REQUEST, message),
+        },
         _ => error(StatusCode::NOT_FOUND, "page not found"),
     }
 }
@@ -263,6 +269,7 @@ fn inspect_container(engine: &Engine, reference: &str) -> Response<Body> {
             "Labels": container["Labels"],
         },
         "Mounts": container.get("Mounts").cloned().unwrap_or_else(|| json!([])),
+        "NetworkSettings": container.get("NetworkSettings").cloned().unwrap_or_else(|| json!({ "Networks": {} })),
     }))
 }
 
@@ -390,13 +397,7 @@ fn stats(engine: &Engine, reference: &str, stream: bool) -> Response<Body> {
 /// The inspect document of a fixture image, with the configuration the fake gives its repository.
 fn inspect_image(engine: &Engine, reference: &str) -> Response<Body> {
     let store = engine.store();
-    let found = store.images.iter().find(|image| {
-        let tagged = image["RepoTags"]
-            .as_array()
-            .is_some_and(|tags| tags.iter().any(|tag| tag == reference));
-        let id = image["Id"].as_str().unwrap_or_default();
-        tagged || id == reference || id.trim_start_matches("sha256:").starts_with(reference)
-    });
+    let found = store.images.iter().find(|image| matches_image(image, reference));
     let Some(image) = found else {
         return error(StatusCode::NOT_FOUND, &format!("No such image: {reference}"));
     };
@@ -675,6 +676,161 @@ fn remove_network(engine: &Engine, reference: &str) -> Response<Body> {
     let id = removed["Id"].as_str().unwrap_or_default();
     engine.emit("network", "destroy", id, &json!({ "name": removed["Name"] }));
     empty(StatusCode::NO_CONTENT)
+}
+
+/// Moves the tag `repo:tag`, `latest` without a tag, to the image `reference` names.
+fn tag_image(engine: &Engine, reference: &str, query: &HashMap<String, String>) -> Response<Body> {
+    let Some(repository) = query.get("repo").filter(|repository| !repository.is_empty()) else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "repository name must have at least one component",
+        );
+    };
+    if repository.chars().any(char::is_uppercase) {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "invalid reference format: repository name must be lowercase",
+        );
+    }
+    let target = Value::from(format!(
+        "{repository}:{}",
+        query.get("tag").map_or("latest", String::as_str)
+    ));
+
+    let id = {
+        let mut store = engine.store();
+        let Some(index) = position(&store.images, |image| matches_image(image, reference)) else {
+            return error(StatusCode::NOT_FOUND, &format!("No such image: {reference}"));
+        };
+        for image in &mut store.images {
+            if let Some(tags) = image["RepoTags"].as_array_mut() {
+                tags.retain(|tag| *tag != target);
+            }
+        }
+        let image = &mut store.images[index];
+        if let Some(tags) = image["RepoTags"].as_array_mut() {
+            tags.push(target.clone());
+        }
+        image["Id"].as_str().unwrap_or_default().to_owned()
+    };
+    engine.emit("image", "tag", &id, &json!({ "name": target }));
+
+    empty(StatusCode::CREATED)
+}
+
+/// Reports pushing the one layer of the local tag `name:tag`, as the engine's push stream does.
+fn push_image(engine: &Engine, name: &str, query: &HashMap<String, String>) -> Response<Body> {
+    let tag = query.get("tag").map_or("latest", String::as_str);
+    let reference = Value::from(format!("{name}:{tag}"));
+    let image = engine
+        .store()
+        .images
+        .iter()
+        .find(|image| {
+            image["RepoTags"]
+                .as_array()
+                .is_some_and(|tags| tags.contains(&reference))
+        })
+        .cloned();
+
+    let mut lines = vec![json!({ "status": format!("The push refers to repository [{name}]") })];
+    match image {
+        None => {
+            let message = format!("An image does not exist locally with the tag: {name}");
+            lines.push(json!({ "errorDetail": { "message": message }, "error": message }));
+        }
+        Some(image) => {
+            let id = image["Id"].as_str().unwrap_or_default().trim_start_matches("sha256:");
+            let layer = id.get(..12).unwrap_or(id);
+            let digest = format!("sha256:{id}");
+            lines.extend([
+                json!({ "status": "Preparing", "progressDetail": {}, "id": layer }),
+                json!({ "status": "Pushing", "progressDetail": { "current": 512, "total": 1024 }, "id": layer }),
+                json!({ "status": "Pushed", "progressDetail": {}, "id": layer }),
+                json!({ "status": format!("{tag}: digest: {digest} size: 528") }),
+                json!({ "progressDetail": {}, "aux": { "Tag": tag, "Digest": digest, "Size": 528 } }),
+            ]);
+        }
+    }
+    let body = lines.iter().fold(String::new(), |mut body, line| {
+        body.push_str(&line.to_string());
+        body.push('\n');
+        body
+    });
+
+    Response::builder()
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(full(Bytes::from(body)))
+        .unwrap_or_default()
+}
+
+/// Connects or disconnects the container `body` names, recording the endpoint under the network's `Containers` and
+/// the container's `NetworkSettings` as the engine reports them.
+fn change_endpoint(engine: &Engine, reference: &str, action: &str, body: &Value) -> Response<Body> {
+    let container = body["Container"].as_str().unwrap_or_default();
+    let network_id = {
+        let mut store = engine.store();
+        let Some(network) = store
+            .networks
+            .iter()
+            .find(|network| matches_network(network, reference))
+        else {
+            return error(StatusCode::NOT_FOUND, &format!("network {reference} not found"));
+        };
+        let network_id = network["Id"].as_str().unwrap_or_default().to_owned();
+        let network_name = network["Name"].as_str().unwrap_or_default().to_owned();
+        let Some(found) = find_container_mut(&mut store.containers, container) else {
+            return no_such_container(container);
+        };
+        let id = found["Id"].as_str().unwrap_or_default().to_owned();
+        let name = found["Names"][0]
+            .as_str()
+            .unwrap_or_default()
+            .trim_start_matches('/')
+            .to_owned();
+        let endpoint_id = engine.new_id();
+
+        if action == "connect" {
+            found["NetworkSettings"]["Networks"][&network_name] = json!({
+                "NetworkID": network_id,
+                "EndpointID": endpoint_id,
+                "Aliases": body["EndpointConfig"]["Aliases"],
+            });
+        } else if found["NetworkSettings"]["Networks"]
+            .as_object_mut()
+            .and_then(|networks| networks.remove(&network_name))
+            .is_none()
+        {
+            return error(
+                StatusCode::CONFLICT,
+                &format!("container {container} is not connected to network {reference}"),
+            );
+        }
+
+        if let Some(network) = store
+            .networks
+            .iter_mut()
+            .find(|network| network["Id"] == network_id.as_str())
+        {
+            if action == "connect" {
+                network["Containers"][&id] = json!({ "Name": name, "EndpointID": endpoint_id });
+            } else if let Some(endpoints) = network["Containers"].as_object_mut() {
+                endpoints.remove(&id);
+            }
+        }
+        network_id
+    };
+    engine.emit("network", action, &network_id, &json!({ "container": container }));
+
+    empty(StatusCode::OK)
+}
+
+fn matches_image(image: &Value, reference: &str) -> bool {
+    let tagged = image["RepoTags"]
+        .as_array()
+        .is_some_and(|tags| tags.iter().any(|tag| tag == reference));
+    let id = image["Id"].as_str().unwrap_or_default();
+    tagged || id == reference || id.trim_start_matches("sha256:").starts_with(reference)
 }
 
 fn find_container<'a>(containers: &'a [Value], reference: &str) -> Option<&'a Value> {
