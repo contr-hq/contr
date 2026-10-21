@@ -51,6 +51,9 @@ pub const INTEGRATION_READY: &str = "contr integration ready";
 /// and `data`.
 pub const MANIFEST_FILE: &str = "guest.json";
 
+/// Exit code of `contr-agent configure` when the engine rejects the configuration.
+pub const CONFIG_REJECTED: u8 = 3;
+
 /// What the engine uses from its next start, which `contr-agent configure` reads as JSON on standard input.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EngineConfig {

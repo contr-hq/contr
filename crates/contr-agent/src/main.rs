@@ -17,6 +17,7 @@ mod mounts;
 mod share;
 
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use contr_core::product;
@@ -41,7 +42,11 @@ enum Command {
         share: bool,
     },
     /// Write the engine configuration on standard input for the engine's next start.
-    Configure,
+    Configure {
+        /// Only ask the engine whether it accepts the configuration; write nothing.
+        #[arg(long)]
+        check: bool,
+    },
     /// Mount the data guest's storage for the runtime guest and hold it until standard input closes.
     DataAnchor,
     /// Serve the engine to the WSL distribution this process runs in until standard input closes.
@@ -57,7 +62,7 @@ enum Command {
     ReleaseDistribution { distribution: String },
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> ExitCode {
     let cli = Cli::parse();
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_env(product::LOG_ENV).unwrap_or_else(|_| EnvFilter::new("info")))
@@ -65,7 +70,27 @@ fn main() -> anyhow::Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
-    run(cli.command)
+    match run(cli.command) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("Error: {error:?}");
+            exit_code(&error)
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn exit_code(error: &anyhow::Error) -> ExitCode {
+    if error.is::<configure::Rejected>() {
+        ExitCode::from(contr_core::guest::CONFIG_REJECTED)
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn exit_code(_: &anyhow::Error) -> ExitCode {
+    ExitCode::FAILURE
 }
 
 #[cfg(target_os = "linux")]
@@ -73,7 +98,7 @@ fn run(command: Command) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     match command {
         Command::Serve { data_root, share } => runtime.block_on(engine::serve(data_root, share)),
-        Command::Configure => configure::configure(),
+        Command::Configure { check } => configure::configure(check),
         Command::DataAnchor => runtime.block_on(data::anchor()),
         Command::Integrate { distribution, owner } => runtime.block_on(integrate::integrate(&distribution, owner)),
         Command::ReleaseDistribution { distribution } => share::release_distributions(Some(&distribution)),
