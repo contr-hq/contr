@@ -545,6 +545,7 @@ fn engine_update(start_with_daemon: bool, etag: &str) -> UpdateSettingsRequest {
             engine: Some(EngineSettings {
                 start_with_daemon,
                 serve_default_pipe: false,
+                ..Default::default()
             }),
             ..Default::default()
         }),
@@ -624,13 +625,6 @@ async fn settings_persist_and_start_the_engine_with_the_daemon() {
 async fn proxy_and_mirror_settings_are_checked_and_stored() {
     let daemon = Daemon::start();
     let client = daemon.client().await;
-    let update = |settings: Settings, paths: &[&str]| UpdateSettingsRequest {
-        settings: Some(settings),
-        update_mask: Some(prost_types::FieldMask {
-            paths: paths.iter().map(|path| (*path).to_owned()).collect(),
-        }),
-        etag: String::new(),
-    };
 
     let defaults = client
         .settings()
@@ -658,7 +652,7 @@ async fn proxy_and_mirror_settings_are_checked_and_stored() {
     };
     let stored = client
         .settings()
-        .update_settings(update(manual, &["proxy.mode", "proxy.http", "registry.mirrors"]))
+        .update_settings(masked(manual, &["proxy.mode", "proxy.http", "registry.mirrors"]))
         .await
         .unwrap()
         .into_inner()
@@ -679,7 +673,7 @@ async fn proxy_and_mirror_settings_are_checked_and_stored() {
     };
     let refused = client
         .settings()
-        .update_settings(update(unusable, &["registry.mirrors"]))
+        .update_settings(masked(unusable, &["registry.mirrors"]))
         .await
         .unwrap_err();
     assert_eq!(refused.code(), tonic::Code::InvalidArgument);
@@ -695,12 +689,68 @@ async fn proxy_and_mirror_settings_are_checked_and_stored() {
     };
     let refused = client
         .settings()
-        .update_settings(update(unnamed, &["proxy.mode"]))
+        .update_settings(masked(unnamed, &["proxy.mode"]))
         .await
         .unwrap_err();
     assert_eq!(refused.code(), tonic::Code::InvalidArgument);
 
     daemon.stop().await;
+}
+
+#[tokio::test]
+async fn daemon_json_is_checked_and_stored() {
+    let daemon = Daemon::start();
+    let client = daemon.client().await;
+
+    let daemon_json = |text: &str| Settings {
+        engine: Some(EngineSettings {
+            daemon_json: text.to_owned(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let stored = client
+        .settings()
+        .update_settings(masked(daemon_json(r#"{"log-level": "warn"}"#), &["engine.daemon_json"]))
+        .await
+        .unwrap()
+        .into_inner()
+        .state
+        .unwrap();
+    let text = stored.settings.unwrap().engine.unwrap().daemon_json;
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+        serde_json::json!({"log-level": "warn"})
+    );
+    for (text, reason) in [
+        (
+            r#"{"hosts": ["tcp://0.0.0.0:2375"]}"#,
+            "engine.daemon_json: hosts is not available",
+        ),
+        ("[]", "engine.daemon_json is not a JSON object"),
+        ("{", "engine.daemon_json is not JSON"),
+    ] {
+        let refused = client
+            .settings()
+            .update_settings(masked(daemon_json(text), &["engine.daemon_json"]))
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code(), tonic::Code::InvalidArgument);
+        assert!(refused.message().starts_with(reason), "{}", refused.message());
+    }
+
+    daemon.stop().await;
+}
+
+/// Update of the `paths` of `settings`, whatever changed since the client last read them.
+fn masked(settings: Settings, paths: &[&str]) -> UpdateSettingsRequest {
+    UpdateSettingsRequest {
+        settings: Some(settings),
+        update_mask: Some(prost_types::FieldMask {
+            paths: paths.iter().map(|path| (*path).to_owned()).collect(),
+        }),
+        etag: String::new(),
+    }
 }
 
 #[tokio::test]

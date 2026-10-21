@@ -33,6 +33,11 @@ message EngineSettings {
   // Windows: also serves the engine on \\.\pipe\docker_engine when no other program does, so tools that ignore Docker
   // contexts reach it. Takes effect at the next engine start.
   bool serve_default_pipe = 2;
+  // The engine's daemon.json as a JSON object; "{}" holds no settings. Contr sets hosts, data-root, host-gateway-ip,
+  // host-gateway-ips, proxies and registry-mirrors itself, so UpdateSettings refuses them, and also refuses what the
+  // engine rejects when it can ask the engine. Applies only where DaemonService.GetInfo reports
+  // CAPABILITY_ENGINE_CONFIGURATION, from the next engine start.
+  string daemon_json = 3;
 }
 
 // How the engine reaches servers outside the machine, for pulls, pushes and builds. Applies only where

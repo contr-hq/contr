@@ -353,6 +353,7 @@ dependencies = [
  "contr-core",
  "contr-testkit",
  "futures-util",
+ "serde_json",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -406,6 +407,7 @@ dependencies = [
  "contr-sdk",
  "crossterm",
  "prost-types",
+ "serde_json",
  "tokio",
 ]
 
@@ -540,6 +542,7 @@ dependencies = [
  "futures-util",
  "prost",
  "prost-types",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
