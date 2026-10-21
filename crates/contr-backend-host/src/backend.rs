@@ -4,16 +4,16 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use contr_backend::{
-    Backend, BackendError, BackendKind, Blocker, Capability, Check, CheckStatus, EngineConnector, Probe, Progress,
-    ProgressSink, RemediationOutcome, ResetScope,
+    Backend, BackendError, BackendKind, Blocker, Capability, Check, CheckStatus, DiagnosticFile, EngineConnector,
+    Probe, Progress, ProgressSink, RemediationOutcome, ResetScope,
 };
 use contr_core::{ErrorReason, Remediation};
 use tokio::net::UnixStream;
 use tokio::time::{self, Instant};
 
 use crate::discovery::{Candidate, Flavor, candidates};
-use crate::remediate;
 use crate::systemd::Systemd;
+use crate::{journal, remediate};
 
 const SOCKET_WAIT: Duration = Duration::from_secs(30);
 const SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -192,6 +192,24 @@ impl Backend for HostBackend {
         };
 
         vec![check]
+    }
+
+    async fn diagnostic_files(&self) -> Vec<DiagnosticFile> {
+        let candidate = match self.reachable().await {
+            Ok(Some(candidate)) => Some(candidate),
+            _ => self.startable().await,
+        };
+        let Some(candidate) = candidate else {
+            return Vec::new();
+        };
+        let Some(unit) = candidate.start_unit else {
+            return Vec::new();
+        };
+
+        vec![DiagnosticFile {
+            name: format!("journal-{unit}.txt"),
+            text: journal::recent(candidate.bus, unit).await,
+        }]
     }
 
     async fn reset(&self, _scope: ResetScope, _progress: &dyn ProgressSink) -> Result<(), BackendError> {

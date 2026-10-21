@@ -205,6 +205,11 @@ pub trait Backend: Send + Sync + 'static {
         Vec::new()
     }
 
+    /// The backend's state and recent logs for a diagnostics bundle; the daemon redacts them before they leave it.
+    async fn diagnostic_files(&self) -> Vec<DiagnosticFile> {
+        Vec::new()
+    }
+
     /// Runs `remediation`, one of [`Backend::remediations`].
     async fn remediate(
         &self,
@@ -265,6 +270,15 @@ pub enum ProxyChoice {
     Manual(Proxy),
     /// Direct connections.
     Direct,
+}
+
+/// Text file of a diagnostics bundle.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiagnosticFile {
+    /// File name inside the backend's directory of the bundle.
+    pub name: String,
+    /// Contents, unredacted.
+    pub text: String,
 }
 
 /// Result of one diagnostic check.

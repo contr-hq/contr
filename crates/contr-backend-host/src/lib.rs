@@ -4,6 +4,7 @@
 
 mod backend;
 mod discovery;
+mod journal;
 mod remediate;
 mod systemd;
 
