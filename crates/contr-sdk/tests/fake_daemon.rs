@@ -19,8 +19,8 @@ use contr_sdk::api::diagnostics::v1::{
     CheckStatus, CreateBundleRequest, RunChecksRequest, RunRemediationRequest, create_bundle_response,
 };
 use contr_sdk::api::engine::v1::{
-    EngineState, ResetRequest, ResetScope, StartRequest, StopRequest, StreamUsageRequest, reset_response,
-    start_response, stop_response,
+    EngineState, ResetRequest, ResetScope, StartRequest, StopRequest, StreamUsageRequest, WatchStateRequest,
+    reset_response, start_response, stop_response,
 };
 use contr_sdk::api::images::v1::{InspectImageRequest, PushImageRequest, TagImageRequest, push_image_response};
 use contr_sdk::api::kubernetes::v1::{ClusterState, GetClusterRequest, ImportImagesRequest, SetCurrentContextRequest};
@@ -29,7 +29,7 @@ use contr_sdk::api::networks::v1::{
 };
 use contr_sdk::api::settings::v1::{
     EngineSettings, GetSettingsRequest, ProxyMode, ProxySettings, RegistrySettings, ResetSettingsRequest, Settings,
-    UpdateSettingsRequest, UpdatesSettings,
+    UpdateSettingsRequest, UpdatesSettings, WatchSettingsRequest,
 };
 use contr_sdk::api::updates::v1::{CheckForUpdatesRequest, GetUpdateStatusRequest};
 use contr_sdk::{Client, ClientIdentity, Endpoint, Error};
@@ -681,7 +681,6 @@ async fn containers_join_and_leave_networks() {
         .unwrap_err();
     assert!(matches!(Error::from(unknown), Error::NotFound(_)));
 
-    drop(watch);
     daemon.stop().await;
 }
 
@@ -801,6 +800,41 @@ async fn a_failed_update_check_says_why() {
     );
 
     daemon.stop().await;
+}
+
+#[tokio::test]
+async fn the_daemon_stops_while_clients_watch() {
+    let daemon = Daemon::start();
+    let client = daemon.client().await;
+    start_engine(&client).await;
+    let mut containers = client
+        .containers()
+        .watch_containers(WatchContainersRequest {})
+        .await
+        .unwrap()
+        .into_inner();
+    let mut settings = client
+        .settings()
+        .watch_settings(WatchSettingsRequest {})
+        .await
+        .unwrap()
+        .into_inner();
+    let mut state = client
+        .engine()
+        .watch_state(WatchStateRequest {})
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(containers.message().await.unwrap().is_some());
+    assert!(settings.message().await.unwrap().is_some());
+    assert!(state.message().await.unwrap().is_some());
+
+    tokio::time::timeout(Duration::from_secs(4), daemon.stop())
+        .await
+        .expect("open watches ended before the grace period ran out");
+    while let Ok(Some(_)) = containers.message().await {}
+    while let Ok(Some(_)) = settings.message().await {}
+    while let Ok(Some(_)) = state.message().await {}
 }
 
 #[tokio::test]
@@ -1213,7 +1247,6 @@ async fn compose_projects_group_the_containers_compose_created() {
         .unwrap_err();
     assert_eq!(unknown.code(), tonic::Code::NotFound);
 
-    drop(watch);
     daemon.stop().await;
 }
 

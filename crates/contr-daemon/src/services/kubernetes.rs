@@ -33,7 +33,7 @@ impl KubernetesService for KubernetesApi {
         let states = WatchStream::new(self.0.kubernetes.subscribe())
             .map(|cluster| Ok(proto::WatchClusterResponse { cluster: Some(cluster) }));
 
-        Ok(Response::new(states.boxed()))
+        Ok(Response::new(self.0.until_stopping(states.boxed())))
     }
 
     async fn reset_cluster(

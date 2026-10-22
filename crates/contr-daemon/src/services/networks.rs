@@ -31,13 +31,15 @@ impl NetworksService for NetworksApi {
         _: Request<proto::WatchNetworksRequest>,
     ) -> Result<Response<Self::WatchNetworksStream>, Status> {
         let changes = self.0.slot.get().await?.cache.watch_networks();
-        Ok(Response::new(watch(changes, |change| proto::WatchNetworksResponse {
-            event: Some(match change {
-                Change::Snapshot(networks) => Event::Snapshot(proto::NetworkSnapshot { networks }),
-                Change::Upsert(network) => Event::Upserted(network),
-                Change::Remove(id) => Event::RemovedId(id),
-            }),
-        })))
+        Ok(Response::new(self.0.until_stopping(watch(changes, |change| {
+            proto::WatchNetworksResponse {
+                event: Some(match change {
+                    Change::Snapshot(networks) => Event::Snapshot(proto::NetworkSnapshot { networks }),
+                    Change::Upsert(network) => Event::Upserted(network),
+                    Change::Remove(id) => Event::RemovedId(id),
+                }),
+            }
+        }))))
     }
 
     async fn inspect_network(
