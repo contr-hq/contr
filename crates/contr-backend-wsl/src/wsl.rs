@@ -12,7 +12,11 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// `wsl.exe` asked for UTF-8; without `WSL_UTF8` it writes UTF-16.
 fn wsl() -> Command {
-    let mut command = Command::new("wsl.exe");
+    #[cfg(windows)]
+    let program = contr_platform::elevation::system_program("wsl.exe").unwrap_or_else(|_| "wsl.exe".into());
+    #[cfg(not(windows))]
+    let program = "wsl.exe";
+    let mut command = Command::new(program);
     command.env("WSL_UTF8", "1").stdin(Stdio::null());
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);

@@ -1,20 +1,36 @@
 //! Programs run with administrator rights after the user approves the Windows elevation prompt.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io;
-use std::os::windows::ffi::OsStrExt;
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::path::{Path, PathBuf};
 
-use windows_sys::Win32::Foundation::{CloseHandle, ERROR_CANCELLED, WAIT_FAILED};
+use windows_sys::Win32::Foundation::{CloseHandle, ERROR_CANCELLED, MAX_PATH, WAIT_FAILED};
+use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
 use windows_sys::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
 use windows_sys::Win32::UI::Shell::{SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
+/// `name` in the System32 directory. Windows finds a bare program name in the launching program's own directory first,
+/// which a per-user install leaves writable by the user, so programs Contr elevates or relies on come from here.
+#[allow(unsafe_code)]
+pub fn system_program(name: &str) -> io::Result<PathBuf> {
+    let mut buffer = [0u16; MAX_PATH as usize];
+    // SAFETY: `buffer` holds MAX_PATH units, the size passed; the call writes at most that many.
+    let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), MAX_PATH) } as usize;
+    if length == 0 || length >= buffer.len() {
+        return Err(io::Error::last_os_error());
+    }
+
+    Ok(PathBuf::from(OsString::from_wide(&buffer[..length])).join(name))
+}
+
 /// Runs `program` with `parameters` elevated and waits for its exit code; blocks while the prompt and the program run.
 /// A declined prompt fails with [`io::ErrorKind::PermissionDenied`].
 #[allow(unsafe_code)]
-pub fn run_elevated(program: &str, parameters: &str) -> io::Result<u32> {
+pub fn run_elevated(program: &Path, parameters: &str) -> io::Result<u32> {
     let verb = wide("runas");
-    let file = wide(program);
+    let file = wide(program.as_os_str());
     let parameters = wide(parameters);
     let mut info = SHELLEXECUTEINFOW {
         cbSize: u32::try_from(size_of::<SHELLEXECUTEINFOW>()).unwrap_or(u32::MAX),
@@ -52,6 +68,6 @@ pub fn run_elevated(program: &str, parameters: &str) -> io::Result<u32> {
     read_error.map_or(Ok(code), Err)
 }
 
-fn wide(text: &str) -> Vec<u16> {
-    OsStr::new(text).encode_wide().chain([0]).collect()
+fn wide(text: impl AsRef<OsStr>) -> Vec<u16> {
+    text.as_ref().encode_wide().chain([0]).collect()
 }
