@@ -1,41 +1,21 @@
-use std::io;
-use std::net::{Ipv4Addr, Ipv6Addr};
-
 use contr_mux::{Channel, MuxStream};
-use tokio::net::TcpStream;
 
 /// Serves a stream the guest opens: a [`Channel::HostTcp`] stream is joined to the port it names on this machine's
-/// loopback interface, trying IPv4 before IPv6.
-pub(crate) async fn serve(channel: Channel, mut stream: MuxStream) {
+/// loopback interface.
+pub(crate) async fn serve(channel: Channel, stream: MuxStream) {
     if channel != Channel::HostTcp {
         tracing::warn!(?channel, "the guest opened an unsupported channel");
         return;
     }
-    let port = match contr_mux::read_host_port(&mut stream).await {
-        Ok(port) => port,
-        Err(error) => {
-            tracing::debug!(%error, "host connection without a port");
-            return;
-        }
-    };
-
-    match connect_loopback(port).await {
-        Ok(mut socket) => {
-            let _ = tokio::io::copy_bidirectional(&mut stream, &mut socket).await;
-        }
-        Err(error) => tracing::debug!(%error, port, "nothing accepts host connections on this port"),
-    }
-}
-
-async fn connect_loopback(port: u16) -> io::Result<TcpStream> {
-    match TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await {
-        Ok(socket) => Ok(socket),
-        Err(_) => TcpStream::connect((Ipv6Addr::LOCALHOST, port)).await,
+    if let Err(error) = contr_mux::join_loopback(stream).await {
+        tracing::debug!(%error, "host connection ended");
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::net::Ipv4Addr;
+
     use contr_mux::Role;
     use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
     use tokio::net::TcpListener;

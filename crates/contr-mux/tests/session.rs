@@ -17,7 +17,7 @@ async fn echo(_channel: Channel, stream: MuxStream) {
 /// Answers a `HostTcp` stream with the port it names.
 async fn report_port(channel: Channel, mut stream: MuxStream) {
     assert_eq!(channel, Channel::HostTcp);
-    let port = contr_mux::read_host_port(&mut stream).await.expect("port arrives");
+    let port = contr_mux::read_port(&mut stream).await.expect("port arrives");
     stream.write_all(&port.to_be_bytes()).await.expect("port is echoed");
     stream.shutdown().await.expect("stream closes");
 }

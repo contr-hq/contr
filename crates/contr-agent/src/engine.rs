@@ -22,8 +22,9 @@ const STOP_GRACE: Duration = Duration::from_secs(30);
 const STABLE_AFTER: Duration = Duration::from_secs(60);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
-/// Runs `dockerd` and relays multiplexed engine streams to its socket until the host closes the session or the agent
-/// receives SIGTERM, then stops `dockerd`. With `share`, `dockerd` also listens on the shared engine socket.
+/// Runs `dockerd` and relays multiplexed engine streams to its socket, and published port streams to the guest's
+/// loopback interface, until the host closes the session or the agent receives SIGTERM, then stops `dockerd`. With
+/// `share`, `dockerd` also listens on the shared engine socket.
 pub(crate) async fn serve(data_root: Option<PathBuf>, share: bool) -> anyhow::Result<()> {
     let data_root = match data_root {
         Some(path) => path,
@@ -86,6 +87,11 @@ async fn relay(channel: Channel, mut stream: MuxStream) {
             }
             Err(error) => tracing::debug!(%error, "engine socket unavailable"),
         },
+        Channel::GuestTcp => {
+            if let Err(error) = contr_mux::join_loopback(stream).await {
+                tracing::debug!(%error, "published port connection ended");
+            }
+        }
         unsupported => tracing::warn!(?unsupported, "channel not served by this agent"),
     }
 }
