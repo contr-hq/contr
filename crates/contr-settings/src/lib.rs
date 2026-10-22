@@ -386,7 +386,7 @@ impl SettingsFile {
             fs::create_dir_all(dir).map_err(write)?;
         }
         let staging = self.path.with_extension("json.tmp");
-        fs::write(&staging, text).map_err(write)?;
+        contr_core::paths::write_private(&staging, text.as_bytes()).map_err(write)?;
 
         fs::rename(&staging, &self.path).map_err(write)
     }

@@ -190,12 +190,7 @@ fn save(path: &Path, root: Hash) -> Result<(), KubeconfigError> {
         fs::copy(path, sibling(path, BACKUP_SUFFIX)).map_err(write)?;
     }
     let staging = sibling(path, "contr-new");
-    fs::write(&staging, content).map_err(write)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&staging, fs::Permissions::from_mode(0o600)).map_err(write)?;
-    }
+    contr_core::paths::write_private(&staging, content.as_bytes()).map_err(write)?;
 
     fs::rename(&staging, path).map_err(write)
 }
