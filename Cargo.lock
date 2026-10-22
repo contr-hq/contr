@@ -422,6 +422,7 @@ dependencies = [
  "contr-platform",
  "contr-transport",
  "futures-util",
+ "getrandom 0.4.3",
  "serde",
  "serde_json",
  "tempfile",

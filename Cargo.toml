@@ -41,6 +41,7 @@ clap = { version = "4.6.7", features = ["derive"] }
 crossterm = { version = "0.29.0", default-features = false, features = ["windows"] }
 form_urlencoded = "1.2.2"
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
+getrandom = "0.4.3"
 http = "1.5.0"
 http-body-util = "0.1.5"
 hyper = { version = "1.12.0", features = ["client", "http1", "server"] }

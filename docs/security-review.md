@@ -10,7 +10,7 @@ users of the same computer, code the user did not choose to run, and the network
 | Place | What protects it | Result |
 |---|---|---|
 | API socket on Unix | `$XDG_RUNTIME_DIR/contr`, created 0700 and refused unless the user owns it; the socket is 0600; every connection's peer UID must be the daemon's before any byte is read; systemd's socket unit uses the same modes | Sound |
-| API and engine pipes on Windows | A protected DACL that allows only the user and SYSTEM, remote clients refused, and the first instance created exclusively so the daemon never shares a name someone else made | Clients did not check who owns the pipe; fixed below |
+| API and engine pipes on Windows | A protected DACL that allows only the user and SYSTEM, remote clients refused, and the first instance created exclusively so the daemon never shares a name someone else made | Clients did not check who owns the pipe, and `docker` cannot; fixed below |
 | Discovery file | The user's runtime directory on Unix and `%LOCALAPPDATA%\Contr\run` on Windows, written 0600 | Sound |
 | `contr-helper` | Run only through pkexec with `auth_admin`; acts only for the user `PKEXEC_UID` names; runs a fixed list of commands with no argument from the caller; the polkit action is bound to `/usr/libexec/contr/contr-helper` | Sound |
 | Elevation on Windows | One administrator prompt, for `wsl --install` | The program was found by search, not from System32; fixed below |
@@ -33,13 +33,10 @@ users of the same computer, code the user did not choose to run, and the network
 | Pipe names are global and predictable, and clients connected to whatever served them. Another user of the same Windows computer could create a user's pipe before the daemon did and receive terminal input, settings and image requests. | Medium, on computers several people sign in to | The daemon names the user as its pipes' owner; the Rust transport and the C# SDK refuse a pipe owned by anyone else. |
 | The Kubernetes server runs privileged from `rancher/k3s:<version>-k3s1`, a tag its publisher can move. A moved tag would have run with the engine's full rights. | Medium | Each supported version names its image index by digest; other versions are refused. |
 | Installing WSL elevated a bare `wsl.exe`, which Windows looks for in `contrd`'s own directory first. A per-user install leaves that directory writable by the user, so a program dropped there would have been the one the prompt ran. | Low | `wsl.exe` comes from System32, for the elevated install and every other call. |
+| `docker` cannot check who owns the engine pipe the `contr` context names, and that name was the same on every run. Another user who took it first would have kept the engine from starting, while a `contr` context left from an earlier run still led `docker` to their pipe. | Low, on computers several people sign in to | The engine pipe's name ends in 16 random bytes, new each time the daemon starts. Only the daemon's user can read the `contr` context that names it. |
 | The settings file and the kubeconfig's staging copy were written with the default permissions, readable by other users where home directories are. | Low | Both are created 0600. |
 
 ## Open
 
-- `docker` cannot check who owns the engine pipe the `contr` context names. If another user took that name first, the
-  engine would not start, since the daemon creates its pipes exclusively, but a `contr` context left from an earlier
-  run would still lead `docker` to that pipe. An engine pipe name that is unpredictable per installation, kept in the
-  context, would close this.
 - Windows binaries stay unsigned until SignPath Foundation accepts Contr; see the
   [code signing policy](code-signing-policy.md).

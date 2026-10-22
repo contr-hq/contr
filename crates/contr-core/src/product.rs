@@ -78,9 +78,11 @@ pub fn api_pipe_name(user_sid: &str) -> String {
     format!(r"\\.\pipe\{SLUG}-{user_sid}-api")
 }
 
-/// Named pipe of the Docker Engine API proxy; the SID keeps users of one Windows host apart.
-pub fn engine_pipe_name(user_sid: &str) -> String {
-    format!(r"\\.\pipe\{SLUG}-{user_sid}-engine")
+/// Named pipe of the Docker Engine API proxy; the SID keeps users of one Windows host apart. `nonce` is new for every
+/// daemon process: the Docker CLI cannot check who owns a pipe, so another user must not be able to create this one
+/// before the daemon does, and only the daemon's user can read the Docker CLI context that names it.
+pub fn engine_pipe_name(user_sid: &str, nonce: &str) -> String {
+    format!(r"\\.\pipe\{SLUG}-{user_sid}-engine-{nonce}")
 }
 
 #[cfg(test)]
@@ -92,6 +94,9 @@ mod tests {
         let sid = "S-1-5-21-1004336348-1177238915-682003330-1001";
 
         assert_eq!(api_pipe_name(sid), format!(r"\\.\pipe\contr-{sid}-api"));
-        assert_eq!(engine_pipe_name(sid), format!(r"\\.\pipe\contr-{sid}-engine"));
+        assert_eq!(
+            engine_pipe_name(sid, "0f1e"),
+            format!(r"\\.\pipe\contr-{sid}-engine-0f1e")
+        );
     }
 }
