@@ -8,15 +8,19 @@ use std::task::{Context, Poll, ready};
 use std::time::Duration;
 
 use futures_util::Stream;
+use std::os::windows::io::AsRawHandle;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient, NamedPipeServer, PipeMode, ServerOptions};
 use tonic::transport::server::Connected;
-use windows_sys::Win32::Foundation::{CloseHandle, ERROR_PIPE_BUSY, HANDLE, LocalFree};
+
+use windows_sys::Win32::Foundation::{CloseHandle, ERROR_PIPE_BUSY, ERROR_SUCCESS, HANDLE, LocalFree};
 use windows_sys::Win32::Security::Authorization::{
-    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo, SDDL_REVISION_1,
+    SE_KERNEL_OBJECT,
 };
 use windows_sys::Win32::Security::{
-    GetTokenInformation, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    GetTokenInformation, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, TOKEN_QUERY,
+    TOKEN_USER, TokenUser,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
@@ -88,7 +92,9 @@ impl Listener {
         let Endpoint::NamedPipe(name) = endpoint else {
             return Err(TransportError::Unsupported("Unix socket"));
         };
-        let sddl = format!("D:P(A;;GA;;;{})(A;;GA;;;SY)", current_user_sid()?);
+        // The explicit owner is what clients check; without it an elevated daemon's pipes would belong to Administrators.
+        let sid = current_user_sid()?;
+        let sddl = format!("O:{sid}D:P(A;;GA;;;{sid})(A;;GA;;;SY)");
         let security = SecurityDescriptor::from_sddl(&sddl)?;
         let next = security.create_instance(name, true, mode)?;
 
@@ -124,15 +130,54 @@ impl Listener {
     }
 }
 
+/// Opens `name` and fails unless the current user owns it. Pipe names are global, so another user could have created
+/// the pipe before the daemon did and would otherwise receive everything the client sends.
 pub(crate) async fn open_client(name: &str) -> io::Result<NamedPipeClient> {
     loop {
         match ClientOptions::new().open(name) {
             Err(error) if error.raw_os_error() == i32::try_from(ERROR_PIPE_BUSY).ok() => {
                 tokio::time::sleep(BUSY_RETRY_DELAY).await;
             }
-            result => return result,
+            Ok(client) => {
+                let owner = owner_sid(&client)?;
+                if owner != current_user_sid()? {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        format!("{name} belongs to another user ({owner})"),
+                    ));
+                }
+                return Ok(client);
+            }
+            Err(error) => return Err(error),
         }
     }
+}
+
+/// String form of the SID that owns the pipe `client` is connected to.
+fn owner_sid(client: &NamedPipeClient) -> io::Result<String> {
+    let mut owner: PSID = ptr::null_mut();
+    let mut descriptor: PSECURITY_DESCRIPTOR = ptr::null_mut();
+    // SAFETY: the handle is an open pipe the client may read the security of; `owner` points into `descriptor`, which
+    // stays alive until the SID is converted below.
+    let status = unsafe {
+        GetSecurityInfo(
+            client.as_raw_handle(),
+            SE_KERNEL_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &raw mut owner,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            &raw mut descriptor,
+        )
+    };
+    if status != ERROR_SUCCESS {
+        return Err(io::Error::from_raw_os_error(i32::try_from(status).unwrap_or(i32::MAX)));
+    }
+    let descriptor = SecurityDescriptor(descriptor);
+    let sid = sid_string(owner);
+    drop(descriptor);
+    sid
 }
 
 /// String form (`S-1-5-21-…`) of the SID the current process runs as.
@@ -156,8 +201,13 @@ pub fn current_user_sid() -> io::Result<String> {
 
     // SAFETY: GetTokenInformation filled `buffer` with a TOKEN_USER whose SID points into the same buffer.
     let sid = unsafe { (*buffer.as_ptr().cast::<TOKEN_USER>()).User.Sid };
+    sid_string(sid)
+}
+
+/// String form (`S-1-…`) of `sid`, which must stay valid for the call.
+fn sid_string(sid: PSID) -> io::Result<String> {
     let mut text: *mut u16 = ptr::null_mut();
-    // SAFETY: `sid` is valid while `buffer` lives; on success `text` receives a LocalAlloc'd string freed below.
+    // SAFETY: the caller keeps `sid` valid for this call; on success `text` receives a LocalAlloc'd string freed below.
     if unsafe { ConvertSidToStringSidW(sid, &raw mut text) } == 0 {
         return Err(io::Error::last_os_error());
     }
@@ -253,8 +303,9 @@ mod tests {
         let endpoint = Endpoint::NamedPipe(name.clone());
         let mut incoming = Listener::bind(&endpoint).unwrap().incoming();
 
-        let _client = open_client(&name).await.unwrap();
+        let client = open_client(&name).await.unwrap();
 
+        assert_eq!(owner_sid(&client).unwrap(), current_user_sid().unwrap());
         assert!(incoming.next().await.unwrap().is_ok());
         assert!(Listener::bind(&endpoint).is_err());
     }

@@ -1,5 +1,6 @@
 using System.IO.Pipes;
 using System.Net.Sockets;
+using System.Runtime.Versioning;
 using System.Security.Principal;
 using Grpc.Net.Client;
 
@@ -60,6 +61,10 @@ public static class ContrChannel
         try
         {
             await pipe.ConnectAsync(PipeConnectTimeout, cancellationToken).ConfigureAwait(false);
+            if (OperatingSystem.IsWindows())
+            {
+                EnsureOwnPipe(pipe, name);
+            }
             return pipe;
         }
         catch (TimeoutException exception)
@@ -72,6 +77,22 @@ public static class ContrChannel
         {
             await pipe.DisposeAsync().ConfigureAwait(false);
             throw;
+        }
+    }
+
+    /// <summary>Fails unless the current user owns the pipe.</summary>
+    /// <remarks>
+    /// Pipe names are global, so another user could have created this one before the daemon did and would otherwise
+    /// receive everything the client sends.
+    /// </remarks>
+    [SupportedOSPlatform("windows")]
+    private static void EnsureOwnPipe(NamedPipeClientStream pipe, string name)
+    {
+        var owner = pipe.GetAccessControl().GetOwner(typeof(SecurityIdentifier));
+        using var identity = WindowsIdentity.GetCurrent();
+        if (!Equals(owner, identity.User))
+        {
+            throw new IOException($"Pipe {name} belongs to another user ({owner}).");
         }
     }
 }
