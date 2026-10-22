@@ -29,13 +29,15 @@ impl VolumesService for VolumesApi {
         _: Request<proto::WatchVolumesRequest>,
     ) -> Result<Response<Self::WatchVolumesStream>, Status> {
         let changes = self.0.slot.get().await?.cache.watch_volumes();
-        Ok(Response::new(watch(changes, |change| proto::WatchVolumesResponse {
-            event: Some(match change {
-                Change::Snapshot(volumes) => Event::Snapshot(proto::VolumeSnapshot { volumes }),
-                Change::Upsert(volume) => Event::Upserted(volume),
-                Change::Remove(name) => Event::RemovedName(name),
-            }),
-        })))
+        Ok(Response::new(self.0.until_stopping(watch(changes, |change| {
+            proto::WatchVolumesResponse {
+                event: Some(match change {
+                    Change::Snapshot(volumes) => Event::Snapshot(proto::VolumeSnapshot { volumes }),
+                    Change::Upsert(volume) => Event::Upserted(volume),
+                    Change::Remove(name) => Event::RemovedName(name),
+                }),
+            }
+        }))))
     }
 
     async fn inspect_volume(

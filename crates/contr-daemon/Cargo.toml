@@ -46,6 +46,7 @@ semver.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream.workspace = true
+tokio-util.workspace = true
 tonic = { workspace = true, features = ["router", "transport"] }
 tonic-types.workspace = true
 tracing.workspace = true

@@ -33,13 +33,15 @@ impl ImagesService for ImagesApi {
         _: Request<proto::WatchImagesRequest>,
     ) -> Result<Response<Self::WatchImagesStream>, Status> {
         let changes = self.0.slot.get().await?.cache.watch_images();
-        Ok(Response::new(watch(changes, |change| proto::WatchImagesResponse {
-            event: Some(match change {
-                Change::Snapshot(images) => Event::Snapshot(proto::ImageSnapshot { images }),
-                Change::Upsert(image) => Event::Upserted(image),
-                Change::Remove(id) => Event::RemovedId(id),
-            }),
-        })))
+        Ok(Response::new(self.0.until_stopping(watch(changes, |change| {
+            proto::WatchImagesResponse {
+                event: Some(match change {
+                    Change::Snapshot(images) => Event::Snapshot(proto::ImageSnapshot { images }),
+                    Change::Upsert(image) => Event::Upserted(image),
+                    Change::Remove(id) => Event::RemovedId(id),
+                }),
+            }
+        }))))
     }
 
     async fn pull_image(

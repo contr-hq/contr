@@ -11,7 +11,7 @@ mod updates;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use contr_api::compose::v1::compose_service_server::ComposeServiceServer;
@@ -30,6 +30,7 @@ use contr_backend::{Backend, BackendKind, EngineConnector, EngineHealth, EngineS
 use contr_core::{paths, product};
 use contr_diagnostics::LogRing;
 use contr_transport::{DiscoveryFile, Endpoint, Listener, TransportError};
+use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
 
 use crate::kubernetes::KubernetesHub;
@@ -108,7 +109,11 @@ pub enum DaemonError {
     },
 }
 
-/// Serves the API until `shutdown` completes.
+/// How long calls still open when the daemon begins to stop may run before it stops serving them.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+
+/// Serves the API until `shutdown` completes. Endless streams end at once; other calls, such as a pull, get
+/// [`SHUTDOWN_GRACE`] to finish.
 pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> Result<(), DaemonError> {
     let listener = bind(config.listen.as_ref())?;
     let settings_file = config.settings_file.clone().or_else(paths::settings_file);
@@ -153,7 +158,9 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
         kubernetes,
         updates,
         log: config.log.clone(),
+        stopping: CancellationToken::new(),
     });
+    let stopping = shared.stopping.clone();
 
     let endpoint = listener.endpoint();
     let discovery = config
@@ -186,8 +193,23 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
         .add_service(KubernetesServiceServer::new(KubernetesApi(Arc::clone(&shared))))
         .add_service(UpdatesServiceServer::new(UpdatesApi(Arc::clone(&shared))))
         .add_service(NetworksServiceServer::new(NetworksApi(shared)))
-        .serve_with_incoming_shutdown(listener.incoming(), shutdown)
-        .await;
+        .serve_with_incoming_shutdown(listener.incoming(), {
+            let stopping = stopping.clone();
+            async move {
+                shutdown.await;
+                stopping.cancel();
+            }
+        });
+    let served = tokio::select! {
+        served = served => served,
+        () = async {
+            stopping.cancelled().await;
+            tokio::time::sleep(SHUTDOWN_GRACE).await;
+        } => {
+            tracing::warn!(seconds = SHUTDOWN_GRACE.as_secs(), "calls still open after the grace period were cut off");
+            Ok(())
+        }
+    };
 
     if let Some(path) = discovery {
         DiscoveryFile::remove(&path, std::process::id());

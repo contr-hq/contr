@@ -36,7 +36,7 @@ impl EngineService for EngineApi {
             })
         });
 
-        Ok(Response::new(states.boxed()))
+        Ok(Response::new(self.0.until_stopping(states.boxed())))
     }
 
     async fn start(&self, _: Request<proto::StartRequest>) -> Result<Response<Self::StartStream>, Status> {
@@ -102,9 +102,9 @@ impl EngineService for EngineApi {
         _: Request<proto::StreamUsageRequest>,
     ) -> Result<Response<Self::StreamUsageStream>, Status> {
         let usage = self.0.slot.get().await?.cache.watch_usage();
-        Ok(Response::new(watch(usage, |usage| proto::StreamUsageResponse {
-            usage: Some(usage),
-        })))
+        Ok(Response::new(self.0.until_stopping(watch(usage, |usage| {
+            proto::StreamUsageResponse { usage: Some(usage) }
+        }))))
     }
 }
 

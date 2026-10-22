@@ -126,7 +126,7 @@ impl ComposeService for ComposeApi {
             yield Err(status::engine_not_running());
         };
 
-        Ok(Response::new(projects.boxed()))
+        Ok(Response::new(self.shared.until_stopping(projects.boxed())))
     }
 
     async fn add_project(
@@ -282,7 +282,9 @@ impl ComposeService for ComposeApi {
             })
             .collect::<Vec<_>>();
 
-        Ok(Response::new(stream::select_all(streams).boxed()))
+        Ok(Response::new(
+            self.shared.until_stopping(stream::select_all(streams).boxed()),
+        ))
     }
 }
 

@@ -39,13 +39,15 @@ impl ContainersService for ContainersApi {
         _: Request<proto::WatchContainersRequest>,
     ) -> Result<Response<Self::WatchContainersStream>, Status> {
         let changes = self.0.slot.get().await?.cache.watch_containers();
-        Ok(Response::new(watch(changes, |change| proto::WatchContainersResponse {
-            event: Some(match change {
-                Change::Snapshot(containers) => Event::Snapshot(proto::ContainerSnapshot { containers }),
-                Change::Upsert(container) => Event::Upserted(container),
-                Change::Remove(id) => Event::RemovedId(id),
-            }),
-        })))
+        Ok(Response::new(self.0.until_stopping(watch(changes, |change| {
+            proto::WatchContainersResponse {
+                event: Some(match change {
+                    Change::Snapshot(containers) => Event::Snapshot(proto::ContainerSnapshot { containers }),
+                    Change::Upsert(container) => Event::Upserted(container),
+                    Change::Remove(id) => Event::RemovedId(id),
+                }),
+            }
+        }))))
     }
 
     async fn inspect_container(
@@ -130,9 +132,9 @@ impl ContainersService for ContainersApi {
         request: Request<proto::StreamLogsRequest>,
     ) -> Result<Response<Self::StreamLogsStream>, Status> {
         let logs = self.0.slot.get().await?.engine.logs(&request.into_inner());
-        Ok(Response::new(
+        Ok(Response::new(self.0.until_stopping(
             logs.map(|chunk| chunk.map_err(status::from_engine)).boxed(),
-        ))
+        )))
     }
 
     async fn stream_stats(
@@ -147,7 +149,7 @@ impl ContainersService for ContainersApi {
                 .map_err(status::from_engine)
         });
 
-        Ok(Response::new(responses.boxed()))
+        Ok(Response::new(self.0.until_stopping(responses.boxed())))
     }
 
     async fn exec(
@@ -182,7 +184,9 @@ impl ContainersService for ContainersApi {
             Ok(response(Output::Exited(proto::ExecExited { exit_code })))
         });
 
-        Ok(Response::new(started.chain(relayed).chain(exited).boxed()))
+        Ok(Response::new(
+            self.0.until_stopping(started.chain(relayed).chain(exited).boxed()),
+        ))
     }
 
     async fn watch_container_stats(
@@ -190,9 +194,9 @@ impl ContainersService for ContainersApi {
         _: Request<proto::WatchContainerStatsRequest>,
     ) -> Result<Response<Self::WatchContainerStatsStream>, Status> {
         let samples = self.0.slot.get().await?.cache.watch_container_stats();
-        Ok(Response::new(watch(samples, |stats| {
+        Ok(Response::new(self.0.until_stopping(watch(samples, |stats| {
             proto::WatchContainerStatsResponse { stats }
-        })))
+        }))))
     }
 
     async fn create_container(

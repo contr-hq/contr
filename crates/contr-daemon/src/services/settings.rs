@@ -51,7 +51,7 @@ impl SettingsService for SettingsApi {
             })
         });
 
-        Ok(Response::new(states.boxed()))
+        Ok(Response::new(self.0.until_stopping(states.boxed())))
     }
 
     async fn update_settings(

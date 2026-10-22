@@ -20,6 +20,7 @@ use contr_backend::{Backend, BackendKind, Capability, EngineSupervisor};
 use contr_diagnostics::LogRing;
 use futures_util::stream::{self, BoxStream};
 use futures_util::{Stream, StreamExt};
+use tokio_util::sync::CancellationToken;
 use tonic::Status;
 
 pub(crate) use compose::ComposeApi;
@@ -61,6 +62,15 @@ pub(crate) struct Shared {
     pub(crate) kubernetes: Arc<KubernetesHub>,
     pub(crate) updates: Arc<UpdatesHub>,
     pub(crate) log: Option<LogRing>,
+    /// Cancelled once the daemon begins to stop.
+    pub(crate) stopping: CancellationToken,
+}
+
+impl Shared {
+    /// Ends `stream` once the daemon begins to stop, since graceful shutdown waits for every open stream.
+    pub(crate) fn until_stopping<T: Send + 'static>(&self, stream: ResponseStream<T>) -> ResponseStream<T> {
+        stream.take_until(self.stopping.clone().cancelled_owned()).boxed()
+    }
 }
 
 /// A watch stream ends only when its engine cache closes, which clients see as `ENGINE_NOT_RUNNING`.
