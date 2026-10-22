@@ -94,7 +94,9 @@ cargo run --package contr-sdkgen -- generate --lang csharp --out target/sdk/csha
 cargo run --package contr-sdkgen -- verify --lang csharp --sdk target/sdk/csharp --daemon target/debug/contrd
 ```
 
-Releases and their signing are described in [docs/releasing.md](docs/releasing.md).
+Releases and their signing are described in [docs/releasing.md](docs/releasing.md); [Verifying downloads](docs/verifying.md)
+shows how to check a release file, and the [Code signing policy](docs/code-signing-policy.md) says what is signed, by
+whom, and what Contr sends over the network.
 
 Contributors follow [CLAUDE.md](CLAUDE.md) and the comment convention in [docs/COMMENTS.md](docs/COMMENTS.md).
 
