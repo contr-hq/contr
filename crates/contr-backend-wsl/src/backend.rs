@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::fmt::Write;
 use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,6 +23,8 @@ use crate::wsl;
 
 /// Pipe the Docker CLI uses when neither a context nor `DOCKER_HOST` names another.
 const DOCKER_DEFAULT_PIPE: &str = r"\\.\pipe\docker_engine";
+/// Random bytes in the engine pipe's name.
+const PIPE_NONCE_BYTES: usize = 16;
 /// Exit code of an installer whose changes take effect after a restart.
 const RESTART_REQUIRED: u32 = 3010;
 
@@ -43,7 +46,7 @@ impl WslBackend {
     /// [`Backend::apply_settings`] asks for it.
     pub fn new(images_dir: PathBuf, integrated: BTreeSet<String>) -> io::Result<Self> {
         let disks_dir = paths::wsl_dir().ok_or_else(|| io::Error::other("LOCALAPPDATA is not set"))?;
-        let engine_pipe = product::engine_pipe_name(&contr_transport::current_user_sid()?);
+        let engine_pipe = product::engine_pipe_name(&contr_transport::current_user_sid()?, &pipe_nonce()?);
 
         Ok(Self {
             images_dir,
@@ -452,4 +455,14 @@ fn report(progress: &dyn ProgressSink, message: &str) {
         message: message.to_owned(),
         fraction: None,
     });
+}
+
+/// Fresh random hex for [`product::engine_pipe_name`].
+fn pipe_nonce() -> io::Result<String> {
+    let mut bytes = [0_u8; PIPE_NONCE_BYTES];
+    getrandom::fill(&mut bytes).map_err(io::Error::other)?;
+    Ok(bytes.iter().fold(String::new(), |mut text, byte| {
+        let _ = write!(text, "{byte:02x}");
+        text
+    }))
 }

@@ -24,6 +24,7 @@ contr-engine-proxy.workspace = true
 contr-platform.workspace = true
 contr-transport.workspace = true
 futures-util.workspace = true
+getrandom.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
