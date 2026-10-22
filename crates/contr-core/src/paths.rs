@@ -86,10 +86,10 @@ pub fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
 }
 
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
     #[test]
     fn private_files_are_the_owners_alone() {
         use std::os::unix::fs::PermissionsExt;
