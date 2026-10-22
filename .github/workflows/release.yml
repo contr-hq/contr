@@ -79,6 +79,17 @@ jobs:
               $imports = & $dumpbin /nologo /dependents "target/release/$exe" | Out-String
               if ($imports -match '(?i)vcruntime|msvcp') { throw "$exe imports the Visual C++ runtime" }
           }
+      - name: The binaries name the product and the build's version
+        shell: pwsh
+        run: |
+          foreach ($exe in 'contrd.exe', 'contr.exe') {
+              $info = (Get-Item "target/release/$exe").VersionInfo
+              if ($info.ProductName -ne 'Contr') { throw "$exe names the product '$($info.ProductName)'" }
+              if (-not $info.ProductVersion) { throw "$exe carries no product version" }
+              if ($env:CONTR_VERSION -and $info.ProductVersion -ne $env:CONTR_VERSION) {
+                  throw "$exe carries version $($info.ProductVersion), not $env:CONTR_VERSION"
+              }
+          }
       # A tag's binaries are signed once the organization holds the Artifact Signing settings; docs/releasing.md.
       - name: Sign the binaries
         if: startsWith(github.ref, 'refs/tags/v') && vars.ARTIFACT_SIGNING_ENDPOINT != ''

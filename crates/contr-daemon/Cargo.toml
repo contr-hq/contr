@@ -59,5 +59,9 @@ contr-backend-wsl.workspace = true
 contr-backend-host.workspace = true
 sd-notify.workspace = true
 
+[build-dependencies]
+contr-core.workspace = true
+winresource.workspace = true
+
 [lints]
 workspace = true
