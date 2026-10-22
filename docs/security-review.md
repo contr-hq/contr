@@ -16,7 +16,8 @@ users of the same computer, code the user did not choose to run, and the network
 | Elevation on Windows | One administrator prompt, for `wsl --install` | The program was found by search, not from System32; fixed below |
 | WSL distributions | Windows interop off in both, so a container that reaches the distribution cannot start Windows programs; the data distribution mounts no Windows drive | Sound |
 | WSL integration | The socket in each of the user's distributions belongs to its default user and the `docker` group, mode 0660, as Docker's own is | Sound |
-| `host.docker.internal` | The guest opens a stream to a Windows loopback port through the session; nothing listens on a Windows network interface | Containers reach the user's localhost services by design |
+| `host.docker.internal` | The guest opens a stream to a Windows loopback port through the session; nothing listens on a Windows network interface for it | Containers reach the user's localhost services by design |
+| Published ports on Windows | `contrd` listens at the address Docker reports for each published TCP port, as Docker does on Linux: `-p 8080:80` on every interface, where Windows Firewall may ask the user to allow `contrd`, and `-p 127.0.0.1:8080:80` on loopback only | Exposed to the network only when published that way, by design |
 | Engine configuration | `daemon.json` keys Contr sets itself, among them `hosts`, are refused, so a setting cannot expose the engine on TCP | Sound |
 | Kubernetes | The API server listens on loopback and needs the client certificate in the kubeconfig | The privileged server ran an image pulled by tag; fixed below |
 | Secrets on disk | Settings may hold proxy credentials; the kubeconfig holds the cluster's client key | Written with default permissions on Unix; fixed below |
