@@ -10,7 +10,7 @@ publish.workspace = true
 
 [dependencies]
 thiserror.workspace = true
-tokio = { workspace = true, features = ["io-util", "rt", "sync"] }
+tokio = { workspace = true, features = ["io-util", "net", "rt", "sync"] }
 tokio-util = { workspace = true, features = ["compat"] }
 tracing.workspace = true
 yamux.workspace = true

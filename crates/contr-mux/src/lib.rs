@@ -5,10 +5,12 @@
 
 use std::future::{Future, poll_fn};
 use std::io;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::task::Poll;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufStream};
+use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::compat::{Compat, FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 use yamux::{Config, Connection, ConnectionError, Mode};
@@ -33,6 +35,8 @@ pub enum Channel {
     Engine = 1,
     /// A TCP connection to the host's loopback interface; its port follows as two big-endian bytes.
     HostTcp = 2,
+    /// A TCP connection to the guest's loopback interface; its port follows as two big-endian bytes.
+    GuestTcp = 3,
 }
 
 impl TryFrom<u8> for Channel {
@@ -42,6 +46,7 @@ impl TryFrom<u8> for Channel {
         match value {
             1 => Ok(Self::Engine),
             2 => Ok(Self::HostTcp),
+            3 => Ok(Self::GuestTcp),
             other => Err(MuxError::UnknownChannel(other)),
         }
     }
@@ -94,19 +99,41 @@ impl Opener {
 
     /// Opens a [`Channel::HostTcp`] stream to `port` on the host's loopback interface.
     pub async fn open_host_tcp(&self, port: u16) -> Result<MuxStream, MuxError> {
-        let mut stream = self.open(Channel::HostTcp).await?;
+        self.open_tcp(Channel::HostTcp, port).await
+    }
+
+    /// Opens a [`Channel::GuestTcp`] stream to `port` on the guest's loopback interface.
+    pub async fn open_guest_tcp(&self, port: u16) -> Result<MuxStream, MuxError> {
+        self.open_tcp(Channel::GuestTcp, port).await
+    }
+
+    async fn open_tcp(&self, channel: Channel, port: u16) -> Result<MuxStream, MuxError> {
+        let mut stream = self.open(channel).await?;
         stream.write_all(&port.to_be_bytes()).await?;
 
         Ok(stream)
     }
 }
 
-/// Port named by a [`Channel::HostTcp`] stream, read after its channel byte.
-pub async fn read_host_port(stream: &mut MuxStream) -> Result<u16, MuxError> {
+/// Port named by a [`Channel::HostTcp`] or [`Channel::GuestTcp`] stream, read after its channel byte.
+pub async fn read_port(stream: &mut MuxStream) -> Result<u16, MuxError> {
     let mut port = [0; 2];
     stream.read_exact(&mut port).await?;
 
     Ok(u16::from_be_bytes(port))
+}
+
+/// Joins a [`Channel::HostTcp`] or [`Channel::GuestTcp`] stream to the port it names on this side's loopback
+/// interface, trying IPv4 before IPv6, until both directions close.
+pub async fn join_loopback(mut stream: MuxStream) -> Result<(), MuxError> {
+    let port = read_port(&mut stream).await?;
+    let mut socket = match TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await {
+        Ok(socket) => socket,
+        Err(_) => TcpStream::connect((Ipv6Addr::LOCALHOST, port)).await?,
+    };
+    tokio::io::copy_bidirectional(&mut stream, &mut socket).await?;
+
+    Ok(())
 }
 
 /// Starts a session over `io`. Each stream the peer opens goes to `handle` on its own task. The returned future
@@ -213,6 +240,7 @@ mod tests {
     fn channel_values_round_trip() {
         assert_eq!(Channel::try_from(Channel::Engine as u8).ok(), Some(Channel::Engine));
         assert_eq!(Channel::try_from(Channel::HostTcp as u8).ok(), Some(Channel::HostTcp));
+        assert_eq!(Channel::try_from(Channel::GuestTcp as u8).ok(), Some(Channel::GuestTcp));
         assert!(matches!(Channel::try_from(0), Err(MuxError::UnknownChannel(0))));
     }
 }
