@@ -58,7 +58,8 @@ pub async fn start(
     report: &mut (dyn FnMut(&[Step]) + Send),
 ) -> Result<(), ClusterError> {
     let mut steps = Steps::new();
-    let image = kube::image(&desired.version);
+    let image = kube::image(&desired.version)
+        .ok_or_else(|| ClusterError::Failed(format!("Contr does not run Kubernetes {}", desired.version)))?;
 
     steps.begin(StepKind::PullImage, &image, report);
     let pulled = pull(engine, &image).await;
