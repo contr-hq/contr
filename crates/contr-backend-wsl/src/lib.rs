@@ -15,6 +15,7 @@ mod images;
 mod integration;
 mod output;
 mod ping;
+mod ports;
 #[cfg(windows)]
 mod session;
 mod wsl;

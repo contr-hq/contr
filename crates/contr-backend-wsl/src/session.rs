@@ -1,7 +1,9 @@
+use std::collections::BTreeSet;
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
+use contr_backend::PublishedPort;
 use contr_core::guest;
 use contr_core::proxy::Proxy;
 use contr_engine_proxy::Rewrites;
@@ -10,13 +12,14 @@ use contr_transport::{Endpoint, Listener};
 use futures_util::StreamExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStdout};
+use tokio::sync::watch;
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{Instant, sleep, timeout};
 
 use crate::engine_config::Configuration;
 use crate::integration::{Integrations, Running};
 use crate::output::{forward_log, wait_for_line};
-use crate::{host_tcp, ping, wsl};
+use crate::{host_tcp, ping, ports, wsl};
 
 const ANCHOR_WAIT: Duration = Duration::from_secs(60);
 const ENGINE_WAIT: Duration = Duration::from_secs(120);
@@ -25,8 +28,8 @@ const POLL_INTERVAL: Duration = Duration::from_millis(500);
 const AGENT_STOP: Duration = Duration::from_secs(60);
 const ANCHOR_STOP: Duration = Duration::from_secs(10);
 
-/// Running engine: the data anchor, the agent, the multiplexed session to the agent, the per-user engine pipe that
-/// relays Docker API connections into that session, and the integrations of the user's distributions.
+/// Running engine: the data anchor, the agent, the multiplexed session to the agent, the engine pipes and published
+/// ports that relay connections into that session, and the integrations of the user's distributions.
 pub(crate) struct Session {
     anchor: Child,
     agent: Child,
@@ -40,13 +43,15 @@ pub(crate) struct Session {
 impl Session {
     /// Configures the engine with `configuration`, anchors the data distribution, starts the agent in the runtime
     /// distribution, serves `engine_pipe` and each of `shared_pipes` no other program owns, and returns once the
-    /// engine answers a ping; the requested `integrations` then run until the session stops.
+    /// engine answers a ping; the `published` ports and the requested `integrations` are then served until the
+    /// session stops.
     pub(crate) async fn start(
         runtime: &str,
         data: &str,
         configuration: &Configuration,
         engine_pipe: &str,
         shared_pipes: &[String],
+        published: watch::Receiver<BTreeSet<PublishedPort>>,
         integrations: &Integrations,
     ) -> io::Result<Self> {
         wsl::configure(runtime, &configuration.engine, wsl::Configure::Apply).await?;
@@ -83,6 +88,7 @@ impl Session {
                 Err(error) => tracing::info!(%error, %pipe, "another program serves this pipe"),
             }
         }
+        relays.push(tokio::spawn(ports::forward(published, opener.clone())));
 
         let mut session = Self {
             anchor,

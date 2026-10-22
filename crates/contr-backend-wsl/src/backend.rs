@@ -7,13 +7,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use async_trait::async_trait;
 use contr_backend::{
     Backend, BackendError, BackendKind, BackendSettings, Blocker, Capability, Check, CheckStatus, DiagnosticFile,
-    EngineConnector, EngineSettings, IntegrationState, Probe, Progress, ProgressSink, RemediationOutcome, ResetScope,
-    WslDistribution, WslIntegration,
+    EngineConnector, EngineSettings, IntegrationState, Probe, Progress, ProgressSink, PublishedPort,
+    RemediationOutcome, ResetScope, WslDistribution, WslIntegration,
 };
 use contr_core::guest::{ConfigRejection, EngineConfig};
 use contr_core::{ErrorReason, Remediation, paths, product};
 use serde_json::{Map, Value};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch};
 
 use crate::engine_config;
 use crate::images::GuestImages;
@@ -37,6 +37,7 @@ pub struct WslBackend {
     default_pipe: AtomicBool,
     engine: std::sync::Mutex<EngineSettings>,
     integrations: Integrations,
+    published: watch::Sender<BTreeSet<PublishedPort>>,
     session: Mutex<Option<Session>>,
 }
 
@@ -55,6 +56,7 @@ impl WslBackend {
             default_pipe: AtomicBool::new(false),
             engine: std::sync::Mutex::default(),
             integrations: Integrations::new(integrated),
+            published: watch::Sender::new(BTreeSet::new()),
             session: Mutex::new(None),
         })
     }
@@ -168,6 +170,7 @@ impl Backend for WslBackend {
             &configuration,
             &self.engine_pipe,
             &self.shared_pipes(),
+            self.published.subscribe(),
             &self.integrations,
         )
         .await?;
@@ -192,6 +195,10 @@ impl Backend for WslBackend {
         if let Ok(mut engine) = self.engine.lock() {
             *engine = settings.engine;
         }
+    }
+
+    fn publish_ports(&self, ports: &BTreeSet<PublishedPort>) {
+        self.published.send_replace(ports.clone());
     }
 
     async fn check_daemon_config(&self, daemon: &Map<String, Value>) -> Result<(), ConfigRejection> {
