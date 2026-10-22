@@ -3,7 +3,9 @@
 
 #![warn(missing_docs)]
 
+use std::collections::BTreeSet;
 use std::io;
+use std::net::IpAddr;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
@@ -188,6 +190,12 @@ pub trait Backend: Send + Sync + 'static {
         let _ = settings;
     }
 
+    /// Takes the TCP ports the engine publishes now; the daemon calls it after every change, and with none while the
+    /// engine is not running. A backend whose engine runs on another network stack serves them on this machine.
+    fn publish_ports(&self, ports: &BTreeSet<PublishedPort>) {
+        let _ = ports;
+    }
+
     /// Asks the engine whether it takes `daemon` as the user's `daemon.json`, and fails with its objections when it
     /// does not. A backend that cannot ask accepts it, and the engine's next start reports the problem instead.
     async fn check_daemon_config(&self, daemon: &Map<String, Value>) -> Result<(), ConfigRejection> {
@@ -222,6 +230,15 @@ pub trait Backend: Send + Sync + 'static {
             remediation.action_id
         ))))
     }
+}
+
+/// TCP port the engine publishes for a container.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PublishedPort {
+    /// Address the engine binds; unspecified for every interface.
+    pub address: IpAddr,
+    /// Port number; never zero.
+    pub port: u16,
 }
 
 /// User settings a backend applies itself.

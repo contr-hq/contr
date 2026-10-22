@@ -2,6 +2,7 @@
 //! the per-user local endpoint.
 
 mod kubernetes;
+mod ports;
 mod services;
 mod settings;
 mod slot;
@@ -132,6 +133,7 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
     }
     let context = docker_context(&config, backend.kind());
     let slot = EngineSlot::spawn(&supervisor, context.clone());
+    ports::spawn(&slot, Arc::clone(&backend));
     let kubernetes = KubernetesHub::spawn(
         &slot,
         &settings,
