@@ -293,7 +293,8 @@ impl Backend for WslBackend {
 
         report(progress, "Installing WSL; approve the administrator prompt");
         let code = tokio::task::spawn_blocking(|| {
-            contr_platform::elevation::run_elevated("wsl.exe", "--install --no-distribution")
+            let wsl = contr_platform::elevation::system_program("wsl.exe")?;
+            contr_platform::elevation::run_elevated(&wsl, "--install --no-distribution")
         })
         .await
         .map_err(io::Error::other)??;
