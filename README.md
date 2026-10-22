@@ -94,6 +94,8 @@ cargo run --package contr-sdkgen -- generate --lang csharp --out target/sdk/csha
 cargo run --package contr-sdkgen -- verify --lang csharp --sdk target/sdk/csharp --daemon target/debug/contrd
 ```
 
+Releases and their signing are described in [docs/releasing.md](docs/releasing.md).
+
 Contributors follow [CLAUDE.md](CLAUDE.md) and the comment convention in [docs/COMMENTS.md](docs/COMMENTS.md).
 
 ## Clean-room policy
