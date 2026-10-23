@@ -20,7 +20,7 @@ generator. The desktop clients live in their own repositories and talk to the da
   socket. The `contr` CLI, the Rust SDK and the generated C# SDK talk to it. Without an engine, `contr fix
   install-engine` installs the distribution's own engine behind one password prompt. Releases carry the
   `contr-daemon` package as `.deb` and `.rpm`.
-- Windows (Phase 2, in progress): `contrd` runs Moby in two Contr-owned WSL 2 distributions and serves the engine on a
+- Windows: `contrd` runs Moby in two Contr-owned WSL 2 distributions and serves the engine on a
   per-user named pipe with the `contr` docker context, and on `\\.\pipe\docker_engine` when no other program
   owns it, so `docker` works without a context. Windows bind paths such as `-v C:\src:/w` work, and
   `host.docker.internal` reaches services on the Windows host, including those bound to `localhost`. A port a
@@ -30,7 +30,12 @@ generator. The desktop clients live in their own repositories and talk to the da
   `contr cli install` installs the bundled Docker CLI, Compose and Buildx for the user. `contr wsl enable <name>`
   gives one of the user's own WSL 2 distributions `docker`, Compose and Buildx on the same engine, with binds of
   the distribution's paths.
-- Both: `contr settings` shows and changes the daemon's settings, and `contr doctor` checks what keeps the engine
+- Both: Compose projects are grouped from the engine's containers, and `contr compose` runs their actions; a
+  single-node k3s cluster runs on the engine through `contr kube`. Pulls, pushes, Compose actions, image imports,
+  diagnostics bundles, fixes and engine operations run as operations the daemon owns, so they go on after the app or
+  command that started them goes away, and every client can follow and cancel them
+  ([ADR 0010](docs/adr/0010-daemon-owned-operations.md)).
+  `contr settings` shows and changes the daemon's settings, and `contr doctor` checks what keeps the engine
   from working and offers fixes that `contr fix` runs. `contr bundle` saves a diagnostics zip for support, with
   credentials and the user's name, home directory and computer name replaced. The daemon checks the published releases
   once a day through the configured proxy, and `contr update` checks now.
