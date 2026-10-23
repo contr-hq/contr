@@ -5,9 +5,9 @@ Contr's Linux packages and its release checksums are signed with the project's G
 key and the signatures. Every release file also carries a GitHub build attestation naming the workflow and commit that
 built it. [Verifying downloads](verifying.md) shows how to check both.
 
-Windows binaries are to be signed through the open-source program of SignPath Foundation: free code signing provided by
-[SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/). Until the program
-accepts Contr, Windows releases are not Authenticode-signed.
+Windows releases are not Authenticode-signed. Their attestations and signed checksums show that a file is the one this
+organization's release workflow built; [Verifying downloads](verifying.md) also covers what Windows shows for unsigned
+programs. If Windows signing is added, it signs only what the next section lists, and this policy names the signer.
 
 ## What gets signed
 

@@ -39,5 +39,5 @@ users of the same computer, code the user did not choose to run, and the network
 
 ## Open
 
-- Windows binaries stay unsigned until SignPath Foundation accepts Contr; see the
-  [code signing policy](code-signing-policy.md).
+- Windows binaries are not Authenticode-signed; their attestations and signed checksums are the way to check them.
+  See the [code signing policy](code-signing-policy.md).

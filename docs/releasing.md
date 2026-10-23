@@ -21,8 +21,7 @@ says what is signed and by whom.
 
 ### Windows binaries (Authenticode)
 
-The plan is SignPath Foundation's free signing for open-source projects; once it accepts Contr, its GitHub action
-replaces the step below. Until then the workflow can sign with Azure Artifact Signing instead:
+Releases are unsigned today. The workflow can sign with Azure Artifact Signing once an account exists:
 `contrd.exe` and `contr.exe` are signed with [Azure Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/)
 through `Azure/artifact-signing-action`. Publicly trusted code-signing keys must live in hardware, so a certificate
 file in a secret is not an option. Set these at the organization level, so `contr-windows` signs its installer with
