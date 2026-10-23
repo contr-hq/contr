@@ -336,7 +336,7 @@ pub mod operations_service_client {
             self.inner.server_streaming(req, path, codec).await
         }
         /// Replays the events the daemon kept for one operation, then streams new ones, and ends with the operation in its
-        /// final state; fails with NOT_FOUND for an operation the daemon no longer keeps. Cancelling the call does not
+        /// final state; fails with NOT_FOUND for an operation the daemon does not keep. Cancelling the call does not
         /// cancel the operation.
         pub async fn follow_operation(
             &mut self,
@@ -368,7 +368,7 @@ pub mod operations_service_client {
             self.inner.server_streaming(req, path, codec).await
         }
         /// Cancels a running operation; does nothing for a finished one, and fails with FAILED_PRECONDITION for one that
-        /// cannot be cancelled and NOT_FOUND for one the daemon no longer keeps.
+        /// cannot be cancelled and NOT_FOUND for one the daemon does not keep.
         pub async fn cancel_operation(
             &mut self,
             request: impl tonic::IntoRequest<super::CancelOperationRequest>,
@@ -446,7 +446,7 @@ pub mod operations_service_server {
             + std::marker::Send
             + 'static;
         /// Replays the events the daemon kept for one operation, then streams new ones, and ends with the operation in its
-        /// final state; fails with NOT_FOUND for an operation the daemon no longer keeps. Cancelling the call does not
+        /// final state; fails with NOT_FOUND for an operation the daemon does not keep. Cancelling the call does not
         /// cancel the operation.
         async fn follow_operation(
             &self,
@@ -456,7 +456,7 @@ pub mod operations_service_server {
             tonic::Status,
         >;
         /// Cancels a running operation; does nothing for a finished one, and fails with FAILED_PRECONDITION for one that
-        /// cannot be cancelled and NOT_FOUND for one the daemon no longer keeps.
+        /// cannot be cancelled and NOT_FOUND for one the daemon does not keep.
         async fn cancel_operation(
             &self,
             request: tonic::Request<super::CancelOperationRequest>,

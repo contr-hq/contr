@@ -24,11 +24,11 @@ service OperationsService {
   // Streams every operation the daemon keeps, then every change to them.
   rpc WatchOperations(WatchOperationsRequest) returns (stream WatchOperationsResponse);
   // Replays the events the daemon kept for one operation, then streams new ones, and ends with the operation in its
-  // final state; fails with NOT_FOUND for an operation the daemon no longer keeps. Cancelling the call does not
+  // final state; fails with NOT_FOUND for an operation the daemon does not keep. Cancelling the call does not
   // cancel the operation.
   rpc FollowOperation(FollowOperationRequest) returns (stream FollowOperationResponse);
   // Cancels a running operation; does nothing for a finished one, and fails with FAILED_PRECONDITION for one that
-  // cannot be cancelled and NOT_FOUND for one the daemon no longer keeps.
+  // cannot be cancelled and NOT_FOUND for one the daemon does not keep.
   rpc CancelOperation(CancelOperationRequest) returns (CancelOperationResponse);
 }
 
