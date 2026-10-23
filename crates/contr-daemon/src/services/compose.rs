@@ -3,9 +3,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use contr_api::common::v1::Progress;
 use contr_api::compose::v1 as proto;
 use contr_api::compose::v1::compose_service_server::ComposeService;
+use contr_api::compose::v1::run_action_response;
 use contr_api::containers::v1::{Container, StreamLogsRequest};
+use contr_api::operations::v1::follow_operation_response::Event as OperationEvent;
+use contr_api::operations::v1::{OperationRequest, operation_request};
 use contr_compose::{Added, Compose, ComposeError, Declared, Output, Target};
 use contr_engine::Change;
 use contr_settings::ComposeProject;
@@ -14,10 +18,12 @@ use tokio::sync::Mutex;
 use tokio_stream::wrappers::WatchStream;
 use tonic::{Request, Response, Status};
 
-use super::{ResponseStream, Shared};
+use super::{ResponseStream, Shared, follow_started};
+use crate::operations::{Admission, Started};
 use crate::status;
 
 /// Compose projects, and Compose run against the engine.
+#[derive(Clone)]
 pub(crate) struct ComposeApi {
     shared: Arc<Shared>,
     support: Arc<ComposeSupport>,
@@ -53,6 +59,60 @@ impl ComposeApi {
             .into_iter()
             .find(|project| project.name == name)
             .ok_or_else(|| Status::not_found(format!("no Compose project is named {name}")))
+    }
+
+    /// Starts `request.action` on its project; fails with `FAILED_PRECONDITION` while another action runs on it.
+    pub(super) async fn start_action(&self, request: proto::RunActionRequest) -> Result<Started, Status> {
+        let project = self.project(&request.project).await?;
+        let compose = self.compose().await?;
+        let target = Target {
+            project: project.name.clone(),
+            working_dir: project.working_dir,
+            config_files: project.config_files,
+        };
+        let invocation = compose
+            .prepare(&target, request.action(), &request.services, request.remove_volumes)
+            .map_err(|error| compose_status(&error))?;
+        let admission = Admission::Exclusive {
+            key: format!("compose {}", project.name),
+            conflict: format!("a Compose action already runs on project {}", project.name),
+        };
+        let operation = OperationRequest {
+            kind: Some(operation_request::Kind::ComposeAction(request)),
+        };
+
+        self.shared
+            .operations
+            .start(operation, true, admission, move |sink| async move {
+                let output = invocation.run().map_err(|error| compose_status(&error))?;
+                let mut output = std::pin::pin!(output);
+                let mut exit = None;
+                while let Some(output) = output.next().await {
+                    let event = match output
+                        .map_err(|error| Status::internal(format!("cannot read Compose's output: {error}")))?
+                    {
+                        Output::Line(line) => {
+                            sink.progress(Progress {
+                                message: line.clone(),
+                                fraction: None,
+                            });
+                            run_action_response::Event::Output(line)
+                        }
+                        Output::Exit(code) => {
+                            exit = Some(code);
+                            run_action_response::Event::ExitCode(code)
+                        }
+                    };
+                    sink.emit(OperationEvent::ComposeAction(proto::RunActionResponse {
+                        event: Some(event),
+                    }));
+                }
+                match exit {
+                    Some(0) => Ok(()),
+                    Some(code) => Err(Status::unknown(format!("Compose exited with code {code}"))),
+                    None => Err(Status::internal("Compose ended without an exit code")),
+                }
+            })
     }
 }
 
@@ -199,35 +259,26 @@ impl ComposeService for ComposeApi {
         &self,
         request: Request<proto::RunActionRequest>,
     ) -> Result<Response<Self::RunActionStream>, Status> {
-        let request = request.into_inner();
-        let action = request.action();
-        let project = self.project(&request.project).await?;
-        let compose = self.compose().await?;
-        let target = Target {
-            project: project.name,
-            working_dir: project.working_dir,
-            config_files: project.config_files,
-        };
+        let started = self.start_action(request.into_inner()).await?;
+        let events = follow_started(
+            &self.shared,
+            &started,
+            true,
+            |event| match event {
+                OperationEvent::ComposeAction(event) => Some(event),
+                _ => None,
+            },
+            |event| {
+                matches!(
+                    event,
+                    OperationEvent::ComposeAction(proto::RunActionResponse {
+                        event: Some(run_action_response::Event::ExitCode(_))
+                    })
+                )
+            },
+        )?;
 
-        let output = compose
-            .run(&target, action, &request.services, request.remove_volumes)
-            .map_err(|error| match error {
-                ComposeError::NoConfigFiles(_) => Status::failed_precondition(error.to_string()),
-                ComposeError::UnknownAction(_) => Status::invalid_argument(error.to_string()),
-                ComposeError::Spawn(ref source) => Status::internal(format!("{error}: {source}")),
-            })?;
-        let events = output.map(|output| {
-            output
-                .map(|output| proto::RunActionResponse {
-                    event: Some(match output {
-                        Output::Line(line) => proto::run_action_response::Event::Output(line),
-                        Output::Exit(code) => proto::run_action_response::Event::ExitCode(code),
-                    }),
-                })
-                .map_err(|error| Status::internal(format!("cannot read Compose's output: {error}")))
-        });
-
-        Ok(Response::new(events.boxed()))
+        Ok(Response::new(events))
     }
 
     async fn stream_logs(
@@ -380,4 +431,12 @@ fn modification_times(files: &[String]) -> Vec<Option<SystemTime>> {
         .iter()
         .map(|file| std::fs::metadata(file).and_then(|metadata| metadata.modified()).ok())
         .collect()
+}
+
+fn compose_status(error: &ComposeError) -> Status {
+    match error {
+        ComposeError::NoConfigFiles(_) => Status::failed_precondition(error.to_string()),
+        ComposeError::UnknownAction(_) => Status::invalid_argument(error.to_string()),
+        ComposeError::Spawn(source) => Status::internal(format!("{error}: {source}")),
+    }
 }

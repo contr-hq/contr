@@ -1,14 +1,20 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use contr_api::common::v1::Progress;
 use contr_api::images::v1 as proto;
 use contr_api::images::v1::images_service_server::ImagesService;
 use contr_api::images::v1::watch_images_response::Event;
+use contr_api::images::v1::{pull_image_response, push_image_response};
+use contr_api::operations::v1::follow_operation_response::Event as OperationEvent;
+use contr_api::operations::v1::{OperationRequest, operation_request};
 use contr_engine::Change;
 use contr_platform::docker_credentials::{self, RegistryCredentials};
 use futures_util::StreamExt;
 use tonic::{Request, Response, Status};
 
-use super::{ResponseStream, Shared, watch};
+use super::{ResponseStream, Shared, follow_started, watch};
+use crate::operations::{Admission, Started};
 use crate::status;
 
 pub(crate) struct ImagesApi(pub(crate) Arc<Shared>);
@@ -48,36 +54,38 @@ impl ImagesService for ImagesApi {
         &self,
         request: Request<proto::PullImageRequest>,
     ) -> Result<Response<Self::PullImageStream>, Status> {
-        let request = request.into_inner();
-        if request.reference.trim().is_empty() {
-            return Err(Status::invalid_argument("reference is empty"));
-        }
+        let started = start_pull(&self.0, request.into_inner()).await?;
+        let events = follow_started(
+            &self.0,
+            &started,
+            true,
+            |event| match event {
+                OperationEvent::PullImage(event) => Some(event),
+                _ => None,
+            },
+            |_| false,
+        )?;
 
-        let handle = self.0.slot.get().await?;
-        let credentials = credentials(&self.0, &request.reference).await;
-        let progress = handle
-            .engine
-            .pull_image(&request.reference, &request.platform, credentials);
-        Ok(Response::new(
-            progress.map(|event| event.map_err(status::from_engine)).boxed(),
-        ))
+        Ok(Response::new(events))
     }
 
     async fn push_image(
         &self,
         request: Request<proto::PushImageRequest>,
     ) -> Result<Response<Self::PushImageStream>, Status> {
-        let request = request.into_inner();
-        if request.reference.trim().is_empty() {
-            return Err(Status::invalid_argument("reference is empty"));
-        }
+        let started = start_push(&self.0, request.into_inner()).await?;
+        let events = follow_started(
+            &self.0,
+            &started,
+            true,
+            |event| match event {
+                OperationEvent::PushImage(event) => Some(event),
+                _ => None,
+            },
+            |_| false,
+        )?;
 
-        let handle = self.0.slot.get().await?;
-        let credentials = credentials(&self.0, &request.reference).await;
-        let progress = handle.engine.push_image(&request.reference, credentials);
-        Ok(Response::new(
-            progress.map(|event| event.map_err(status::from_engine)).boxed(),
-        ))
+        Ok(Response::new(events))
     }
 
     async fn tag_image(
@@ -143,6 +151,87 @@ impl ImagesService for ImagesApi {
         handle.cache.refresh_images().await;
 
         Ok(Response::new(response))
+    }
+}
+
+/// Starts pulling `request.reference`, or returns the running pull of the same reference and platform.
+pub(super) async fn start_pull(shared: &Shared, request: proto::PullImageRequest) -> Result<Started, Status> {
+    if request.reference.trim().is_empty() {
+        return Err(Status::invalid_argument("reference is empty"));
+    }
+    let handle = shared.slot.get().await?;
+    let credentials = credentials(shared, &request.reference).await;
+    let key = format!("pull {} {}", request.reference, request.platform);
+    let pulls = handle
+        .engine
+        .pull_image(&request.reference, &request.platform, credentials);
+    let reference = request.reference.clone();
+    let operation = OperationRequest {
+        kind: Some(operation_request::Kind::PullImage(request)),
+    };
+
+    shared
+        .operations
+        .start(operation, true, Admission::Join(key), move |sink| async move {
+            let mut pulls = std::pin::pin!(pulls);
+            let mut layers = HashMap::new();
+            while let Some(event) = pulls.next().await {
+                let event = event.map_err(status::from_engine)?;
+                if let Some(pull_image_response::Event::Layer(layer)) = &event.event {
+                    layers.insert(layer.layer_id.clone(), (layer.current_bytes, layer.total_bytes));
+                    sink.progress(pull_progress(&reference, &layers));
+                }
+                sink.emit(OperationEvent::PullImage(event));
+            }
+            Ok(())
+        })
+}
+
+/// Starts pushing `request.reference`, or returns the running push of the same reference.
+pub(super) async fn start_push(shared: &Shared, request: proto::PushImageRequest) -> Result<Started, Status> {
+    if request.reference.trim().is_empty() {
+        return Err(Status::invalid_argument("reference is empty"));
+    }
+    let handle = shared.slot.get().await?;
+    let credentials = credentials(shared, &request.reference).await;
+    let key = format!("push {}", request.reference);
+    let pushes = handle.engine.push_image(&request.reference, credentials);
+    let operation = OperationRequest {
+        kind: Some(operation_request::Kind::PushImage(request)),
+    };
+
+    shared
+        .operations
+        .start(operation, true, Admission::Join(key), move |sink| async move {
+            let mut pushes = std::pin::pin!(pushes);
+            while let Some(event) = pushes.next().await {
+                let event = event.map_err(status::from_engine)?;
+                if let Some(push_image_response::Event::Status(line)) = &event.event {
+                    sink.progress(Progress {
+                        message: line.clone(),
+                        fraction: None,
+                    });
+                }
+                sink.emit(OperationEvent::PushImage(event));
+            }
+            Ok(())
+        })
+}
+
+/// Bytes of the layers whose size the engine reported, as a share of their sizes.
+fn pull_progress(reference: &str, layers: &HashMap<String, (u64, u64)>) -> Progress {
+    let (current, total) = layers.values().filter(|(_, total)| *total > 0).fold(
+        (0_u64, 0_u64),
+        |(current, total), (layer_current, layer_total)| {
+            (current + layer_current.min(layer_total), total + layer_total)
+        },
+    );
+    #[expect(clippy::cast_precision_loss, reason = "a progress fraction needs no more precision")]
+    let fraction = (total > 0).then(|| current as f32 / total as f32);
+
+    Progress {
+        message: format!("Pulling {reference}"),
+        fraction,
     }
 }
 

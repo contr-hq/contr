@@ -4,13 +4,18 @@ use contr_api::common::v1::Progress;
 use contr_api::engine::v1 as proto;
 use contr_api::engine::v1::engine_service_server::EngineService;
 use contr_api::engine::v1::{reset_response, restart_response, start_response, stop_response};
+use contr_api::operations::v1::OperationRequest;
+use contr_api::operations::v1::follow_operation_response::Event;
+use contr_api::operations::v1::operation_request::Kind;
 use contr_backend::{EngineState, OperationEvent, ResetScope};
 use futures_util::stream::BoxStream;
 use futures_util::{Stream, StreamExt};
 use tokio_stream::wrappers::WatchStream;
 use tonic::{Request, Response, Status};
 
-use super::{ResponseStream, Shared, watch};
+use super::{ResponseStream, Shared, follow_started, watch};
+use crate::operations::{Admission, Started};
+use crate::slot::EngineSlot;
 use crate::status;
 
 pub(crate) struct EngineApi(pub(crate) Arc<Shared>);
@@ -40,61 +45,75 @@ impl EngineService for EngineApi {
     }
 
     async fn start(&self, _: Request<proto::StartRequest>) -> Result<Response<Self::StartStream>, Status> {
-        let events = self.until_ready(self.0.supervisor.start().await);
-        Ok(Response::new(operation(
-            events,
-            |progress| proto::StartResponse {
-                event: Some(start_response::Event::Progress(progress)),
+        let started = start_engine(&self.0, Kind::StartEngine(proto::StartRequest {}))?;
+        Ok(Response::new(follow_started(
+            &self.0,
+            &started,
+            false,
+            |event| {
+                engine_event(event).map(|event| proto::StartResponse {
+                    event: Some(match event {
+                        Either::Progress(progress) => start_response::Event::Progress(progress),
+                        Either::State(state) => start_response::Event::State(state),
+                    }),
+                })
             },
-            |state| proto::StartResponse {
-                event: Some(start_response::Event::State(state.into())),
-            },
-        )))
+            |_| false,
+        )?))
     }
 
     async fn stop(&self, _: Request<proto::StopRequest>) -> Result<Response<Self::StopStream>, Status> {
-        let events = self.0.supervisor.stop().await.boxed();
-        Ok(Response::new(operation(
-            events,
-            |progress| proto::StopResponse {
-                event: Some(stop_response::Event::Progress(progress)),
+        let started = start_engine(&self.0, Kind::StopEngine(proto::StopRequest {}))?;
+        Ok(Response::new(follow_started(
+            &self.0,
+            &started,
+            false,
+            |event| {
+                engine_event(event).map(|event| proto::StopResponse {
+                    event: Some(match event {
+                        Either::Progress(progress) => stop_response::Event::Progress(progress),
+                        Either::State(state) => stop_response::Event::State(state),
+                    }),
+                })
             },
-            |state| proto::StopResponse {
-                event: Some(stop_response::Event::State(state.into())),
-            },
-        )))
+            |_| false,
+        )?))
     }
 
     async fn restart(&self, _: Request<proto::RestartRequest>) -> Result<Response<Self::RestartStream>, Status> {
-        let events = self.until_ready(self.0.supervisor.restart().await);
-        Ok(Response::new(operation(
-            events,
-            |progress| proto::RestartResponse {
-                event: Some(restart_response::Event::Progress(progress)),
+        let started = start_engine(&self.0, Kind::RestartEngine(proto::RestartRequest {}))?;
+        Ok(Response::new(follow_started(
+            &self.0,
+            &started,
+            false,
+            |event| {
+                engine_event(event).map(|event| proto::RestartResponse {
+                    event: Some(match event {
+                        Either::Progress(progress) => restart_response::Event::Progress(progress),
+                        Either::State(state) => restart_response::Event::State(state),
+                    }),
+                })
             },
-            |state| proto::RestartResponse {
-                event: Some(restart_response::Event::State(state.into())),
-            },
-        )))
+            |_| false,
+        )?))
     }
 
     async fn reset(&self, request: Request<proto::ResetRequest>) -> Result<Response<Self::ResetStream>, Status> {
-        let scope = match request.into_inner().scope() {
-            proto::ResetScope::Runtime => ResetScope::Runtime,
-            proto::ResetScope::Factory => ResetScope::Factory,
-            proto::ResetScope::Unspecified => return Err(Status::invalid_argument("a reset scope is required")),
-        };
-        let events = self.0.supervisor.reset(scope).await.boxed();
-
-        Ok(Response::new(operation(
-            events,
-            |progress| proto::ResetResponse {
-                event: Some(reset_response::Event::Progress(progress)),
+        let started = start_engine(&self.0, Kind::ResetEngine(request.into_inner()))?;
+        Ok(Response::new(follow_started(
+            &self.0,
+            &started,
+            false,
+            |event| {
+                engine_event(event).map(|event| proto::ResetResponse {
+                    event: Some(match event {
+                        Either::Progress(progress) => reset_response::Event::Progress(progress),
+                        Either::State(state) => reset_response::Event::State(state),
+                    }),
+                })
             },
-            |state| proto::ResetResponse {
-                event: Some(reset_response::Event::State(state.into())),
-            },
-        )))
+            |_| false,
+        )?))
     }
 
     async fn stream_usage(
@@ -108,42 +127,94 @@ impl EngineService for EngineApi {
     }
 }
 
-impl EngineApi {
-    /// Holds back a successful result until the engine handle is ready, so calls made after it find the engine.
-    fn until_ready(
-        &self,
-        events: impl Stream<Item = OperationEvent> + Send + 'static,
-    ) -> BoxStream<'static, OperationEvent> {
-        let slot = self.0.slot.clone();
-        events
-            .then(move |event| {
-                let slot = slot.clone();
-                async move {
-                    if matches!(event, OperationEvent::Finished(Ok(EngineState::Running))) {
-                        let _ = slot.get().await;
-                    }
-                    event
+/// Starts the engine operation `kind` names, or returns the running one of the same kind and scope; later ones queue
+/// behind it in the supervisor.
+pub(super) fn start_engine(shared: &Arc<Shared>, kind: Kind) -> Result<Started, Status> {
+    let key = match &kind {
+        Kind::StartEngine(_) => "engine start".to_owned(),
+        Kind::StopEngine(_) => "engine stop".to_owned(),
+        Kind::RestartEngine(_) => "engine restart".to_owned(),
+        Kind::ResetEngine(request) => match request.scope() {
+            proto::ResetScope::Unspecified => return Err(Status::invalid_argument("a reset scope is required")),
+            scope => format!("engine reset {}", scope.as_str_name()),
+        },
+        _ => return Err(Status::invalid_argument("not an engine operation")),
+    };
+    let supervisor = shared.supervisor.clone();
+    let slot = shared.slot.clone();
+    let operation = OperationRequest {
+        kind: Some(kind.clone()),
+    };
+
+    shared
+        .operations
+        .start(operation, false, Admission::Join(key), move |sink| async move {
+            let events = match kind {
+                Kind::StopEngine(_) => supervisor.stop().await.boxed(),
+                Kind::RestartEngine(_) => until_ready(slot, supervisor.restart().await),
+                Kind::ResetEngine(request) => {
+                    let scope = match request.scope() {
+                        proto::ResetScope::Factory => ResetScope::Factory,
+                        _ => ResetScope::Runtime,
+                    };
+                    supervisor.reset(scope).await.boxed()
                 }
-            })
-            .boxed()
-    }
+                _ => until_ready(slot, supervisor.start().await),
+            };
+            let mut events = std::pin::pin!(events);
+            while let Some(event) = events.next().await {
+                match event {
+                    OperationEvent::Progress(step) => {
+                        let progress = Progress {
+                            message: step.message,
+                            fraction: step.fraction,
+                        };
+                        sink.progress(progress.clone());
+                        sink.emit(Event::EngineProgress(progress));
+                    }
+                    OperationEvent::Finished(Ok(state)) => {
+                        sink.emit(Event::EngineState(engine_state(state).0.into()));
+                        return Ok(());
+                    }
+                    OperationEvent::Finished(Err(error)) => return Err(status::from_operation(&error)),
+                }
+            }
+            Err(Status::internal(
+                "the engine supervisor ended the operation without a result",
+            ))
+        })
 }
 
-fn operation<T: Send + 'static>(
-    events: BoxStream<'static, OperationEvent>,
-    progress: fn(Progress) -> T,
-    finished: fn(proto::EngineState) -> T,
-) -> ResponseStream<T> {
+/// Holds back a successful result until the engine handle is ready, so calls made after it find the engine.
+fn until_ready(
+    slot: EngineSlot,
+    events: impl Stream<Item = OperationEvent> + Send + 'static,
+) -> BoxStream<'static, OperationEvent> {
     events
-        .map(move |event| match event {
-            OperationEvent::Progress(step) => Ok(progress(Progress {
-                message: step.message,
-                fraction: step.fraction,
-            })),
-            OperationEvent::Finished(Ok(state)) => Ok(finished(engine_state(state).0)),
-            OperationEvent::Finished(Err(error)) => Err(status::from_operation(&error)),
+        .then(move |event| {
+            let slot = slot.clone();
+            async move {
+                if matches!(event, OperationEvent::Finished(Ok(EngineState::Running))) {
+                    let _ = slot.get().await;
+                }
+                event
+            }
         })
         .boxed()
+}
+
+enum Either {
+    Progress(Progress),
+    State(i32),
+}
+
+/// An engine operation's event as the engine RPCs send it.
+fn engine_event(event: Event) -> Option<Either> {
+    match event {
+        Event::EngineProgress(progress) => Some(Either::Progress(progress)),
+        Event::EngineState(state) => Some(Either::State(state)),
+        _ => None,
+    }
 }
 
 fn engine_state(state: EngineState) -> (proto::EngineState, contr_api::common::v1::ErrorReason) {

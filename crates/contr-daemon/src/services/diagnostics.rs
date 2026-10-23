@@ -5,21 +5,20 @@ use contr_api::common::v1 as common;
 use contr_api::diagnostics::v1 as proto;
 use contr_api::diagnostics::v1::diagnostics_service_server::DiagnosticsService;
 use contr_api::diagnostics::v1::{create_bundle_response, run_remediation_response::Event};
+use contr_api::operations::v1::follow_operation_response::Event as OperationEvent;
+use contr_api::operations::v1::{OperationRequest, operation_request};
 use contr_backend::{Backend, BackendError, Check, CheckStatus, EngineState, Progress, ProgressSink};
 use contr_core::Remediation;
 use contr_diagnostics::{Bundle, BundleError, Identity, Redactor};
-use futures_util::StreamExt;
 use serde_json::{Value, json};
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
-use super::{ResponseStream, Shared};
+use super::{ResponseStream, Shared, follow_started};
+use crate::operations::{Admission, Sink, Started};
 
 const GIB: u64 = 1024 * 1024 * 1024;
 const DISK_FAIL_BELOW: u64 = 2 * GIB;
 const DISK_WARN_BELOW: u64 = 10 * GIB;
-const EVENT_QUEUE: usize = 32;
 const BUNDLE_CHUNK: usize = 64 * 1024;
 const COMPOSE_PROJECT_LABEL: &str = "com.docker.compose.project";
 /// Check of the backends that serve the Docker CLI's default endpoint, which the `default` context reaches.
@@ -48,27 +47,72 @@ impl DiagnosticsService for DiagnosticsApi {
         &self,
         request: Request<proto::RunRemediationRequest>,
     ) -> Result<Response<Self::RunRemediationStream>, Status> {
-        let action_id = request.into_inner().action_id;
-        let remediation = self
-            .0
-            .backend
-            .remediations()
-            .iter()
-            .find(|remediation| remediation.action_id == action_id)
-            .cloned()
-            .ok_or_else(|| Status::not_found(format!("this backend offers no remediation {action_id:?}")))?;
+        let started = start_remediation(&self.0, request.into_inner())?;
+        let events = follow_started(
+            &self.0,
+            &started,
+            false,
+            |event| match event {
+                OperationEvent::RunRemediation(event) => Some(event),
+                _ => None,
+            },
+            |_| false,
+        )?;
 
-        let (events, receiver) = mpsc::channel(EVENT_QUEUE);
-        let backend = Arc::clone(&self.0.backend);
-        tokio::spawn(async move {
-            let sink = ChannelSink(events.clone());
-            let finished = match backend.remediate(&remediation, &sink).await {
-                Ok(outcome) => Ok(proto::RunRemediationResponse {
-                    event: Some(Event::Outcome(proto::RemediationOutcome {
-                        restart_required: outcome.restart_required,
-                        logout_required: outcome.logout_required,
-                    })),
-                }),
+        Ok(Response::new(events))
+    }
+
+    async fn create_bundle(
+        &self,
+        _: Request<proto::CreateBundleRequest>,
+    ) -> Result<Response<Self::CreateBundleStream>, Status> {
+        let started = start_bundle(&self.0)?;
+        let events = follow_started(
+            &self.0,
+            &started,
+            true,
+            |event| match event {
+                OperationEvent::CreateBundle(event) => Some(event),
+                _ => None,
+            },
+            |_| false,
+        )?;
+
+        Ok(Response::new(events))
+    }
+}
+
+/// Starts the remediation `request.action_id` names, or returns the one already running.
+pub(super) fn start_remediation(
+    shared: &Arc<Shared>,
+    request: proto::RunRemediationRequest,
+) -> Result<Started, Status> {
+    let remediation = shared
+        .backend
+        .remediations()
+        .iter()
+        .find(|remediation| remediation.action_id == request.action_id)
+        .cloned()
+        .ok_or_else(|| Status::not_found(format!("this backend offers no remediation {:?}", request.action_id)))?;
+    let key = format!("remediation {}", request.action_id);
+    let operation = OperationRequest {
+        kind: Some(operation_request::Kind::RunRemediation(request)),
+    };
+    let backend = Arc::clone(&shared.backend);
+
+    shared
+        .operations
+        .start(operation, false, Admission::Join(key), move |sink| async move {
+            match backend.remediate(&remediation, &RemediationSink(sink.clone())).await {
+                Ok(outcome) => {
+                    sink.emit(OperationEvent::RunRemediation(proto::RunRemediationResponse {
+                        event: Some(Event::Outcome(proto::RemediationOutcome {
+                            restart_required: outcome.restart_required,
+                            logout_required: outcome.logout_required,
+                        })),
+                    }));
+                    Ok(())
+                }
                 Err(error @ BackendError::Dismissed) => Err(Status::cancelled(format!(
                     "{} did not run: {error}",
                     remediation.action_id
@@ -77,51 +121,45 @@ impl DiagnosticsService for DiagnosticsApi {
                     "{} failed: {error}",
                     remediation.action_id
                 ))),
-            };
-            // The caller may have dropped the stream; the remediation still ran.
-            let _ = events.send(finished).await;
-        });
+            }
+        })
+}
 
-        Ok(Response::new(ReceiverStream::new(receiver).boxed()))
-    }
+/// Starts writing a diagnostics bundle, or returns the one already being written; the zip arrives in chunks once it
+/// is whole.
+pub(super) fn start_bundle(shared: &Arc<Shared>) -> Result<Started, Status> {
+    let redactor = Redactor::new(&Identity::current()).map_err(|error| Status::internal(error.to_string()))?;
+    let operation = OperationRequest {
+        kind: Some(operation_request::Kind::CreateBundle(proto::CreateBundleRequest {})),
+    };
+    let shared = Arc::clone(shared);
 
-    async fn create_bundle(
-        &self,
-        _: Request<proto::CreateBundleRequest>,
-    ) -> Result<Response<Self::CreateBundleStream>, Status> {
-        let redactor = Redactor::new(&Identity::current()).map_err(|error| Status::internal(error.to_string()))?;
-        let (events, receiver) = mpsc::channel(EVENT_QUEUE);
-        let shared = Arc::clone(&self.0);
-        tokio::spawn(async move {
+    Arc::clone(&shared.operations).start(
+        operation,
+        true,
+        Admission::Join("bundle".to_owned()),
+        move |sink| async move {
             let step = |message: &str| {
-                let _ = events.try_send(Ok(proto::CreateBundleResponse {
-                    event: Some(create_bundle_response::Event::Progress(common::Progress {
-                        message: message.to_owned(),
-                        fraction: None,
-                    })),
+                let progress = common::Progress {
+                    message: message.to_owned(),
+                    fraction: None,
+                };
+                sink.progress(progress.clone());
+                sink.emit(OperationEvent::CreateBundle(proto::CreateBundleResponse {
+                    event: Some(create_bundle_response::Event::Progress(progress)),
                 }));
             };
-            match write_bundle(&shared, redactor, step).await {
-                Ok(zip) => {
-                    for chunk in zip.chunks(BUNDLE_CHUNK) {
-                        let chunk = proto::CreateBundleResponse {
-                            event: Some(create_bundle_response::Event::Chunk(chunk.to_vec())),
-                        };
-                        if events.send(Ok(chunk)).await.is_err() {
-                            return;
-                        }
-                    }
-                }
-                Err(error) => {
-                    let _ = events
-                        .send(Err(Status::internal(format!("cannot write the bundle: {error}"))))
-                        .await;
-                }
+            let zip = write_bundle(&shared, redactor, step)
+                .await
+                .map_err(|error| Status::internal(format!("cannot write the bundle: {error}")))?;
+            for chunk in zip.chunks(BUNDLE_CHUNK) {
+                sink.emit(OperationEvent::CreateBundle(proto::CreateBundleResponse {
+                    event: Some(create_bundle_response::Event::Chunk(chunk.to_vec())),
+                }));
             }
-        });
-
-        Ok(Response::new(ReceiverStream::new(receiver).boxed()))
-    }
+            Ok(())
+        },
+    )
 }
 
 async fn run_all_checks(shared: &Shared) -> Vec<Check> {
@@ -241,16 +279,20 @@ fn cluster_json(cluster: &contr_api::kubernetes::v1::Cluster) -> Value {
     })
 }
 
-struct ChannelSink(mpsc::Sender<Result<proto::RunRemediationResponse, Status>>);
+/// Reports a remediation's steps as the operation's events and steps.
+struct RemediationSink(Sink);
 
-impl ProgressSink for ChannelSink {
+impl ProgressSink for RemediationSink {
     fn report(&self, progress: Progress) {
-        let _ = self.0.try_send(Ok(proto::RunRemediationResponse {
-            event: Some(Event::Progress(common::Progress {
-                message: progress.message,
-                fraction: progress.fraction,
-            })),
-        }));
+        let progress = common::Progress {
+            message: progress.message,
+            fraction: progress.fraction,
+        };
+        self.0.progress(progress.clone());
+        self.0
+            .emit(OperationEvent::RunRemediation(proto::RunRemediationResponse {
+                event: Some(Event::Progress(progress)),
+            }));
     }
 }
 

@@ -27,6 +27,11 @@ use contr_sdk::api::kubernetes::v1::{ClusterState, GetClusterRequest, ImportImag
 use contr_sdk::api::networks::v1::{
     CheckHostPortsRequest, ConnectNetworkRequest, DisconnectNetworkRequest, HostPort, InspectNetworkRequest,
 };
+use contr_sdk::api::operations::v1::follow_operation_response::Event as OperationEvent;
+use contr_sdk::api::operations::v1::{
+    CancelOperationRequest, FollowOperationRequest, OperationRequest, OperationState, StartOperationRequest,
+    WatchOperationsRequest, operation_request, watch_operations_response,
+};
 use contr_sdk::api::settings::v1::{
     EngineSettings, GetSettingsRequest, ProxyMode, ProxySettings, RegistrySettings, ResetSettingsRequest, Settings,
     UpdateSettingsRequest, UpdatesSettings, WatchSettingsRequest,
@@ -604,6 +609,68 @@ async fn images_are_tagged_and_pushed() {
         "{}",
         failure.message()
     );
+
+    daemon.stop().await;
+}
+
+#[tokio::test]
+async fn operations_outlive_the_client_that_started_them() {
+    let daemon = Daemon::start();
+    let first = daemon.client().await;
+    let started = first
+        .operations()
+        .start_operation(StartOperationRequest {
+            request: Some(OperationRequest {
+                kind: Some(operation_request::Kind::StartEngine(StartRequest {})),
+            }),
+        })
+        .await
+        .unwrap()
+        .into_inner()
+        .operation
+        .unwrap();
+    drop(first);
+
+    let client = daemon.client().await;
+    let mut operations = client
+        .operations()
+        .watch_operations(WatchOperationsRequest {})
+        .await
+        .unwrap()
+        .into_inner();
+    let Some(watch_operations_response::Event::Snapshot(snapshot)) = operations.message().await.unwrap().unwrap().event
+    else {
+        panic!("the watch did not start with a snapshot");
+    };
+    assert_eq!(snapshot.operations[0].id, started.id);
+
+    let mut events = client
+        .operations()
+        .follow_operation(FollowOperationRequest { id: started.id.clone() })
+        .await
+        .unwrap()
+        .into_inner();
+    let (mut engine_state, mut finished) = (None, None);
+    while let Some(event) = events.message().await.unwrap() {
+        match event.event.unwrap() {
+            OperationEvent::EngineState(state) => engine_state = Some(state),
+            OperationEvent::Finished(operation) => finished = Some(operation),
+            _ => {}
+        }
+    }
+    assert_eq!(engine_state, Some(EngineState::Running.into()));
+    let finished = finished.unwrap();
+    assert_eq!(finished.state(), OperationState::Succeeded);
+    assert!(!finished.cancellable);
+
+    let refused = client
+        .operations()
+        .cancel_operation(CancelOperationRequest {
+            id: "unknown".to_owned(),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(Error::from(refused), Error::NotFound(_)));
 
     daemon.stop().await;
 }
