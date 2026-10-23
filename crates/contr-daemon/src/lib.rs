@@ -2,6 +2,7 @@
 //! the per-user local endpoint.
 
 mod kubernetes;
+mod operations;
 mod ports;
 mod services;
 mod settings;
@@ -24,6 +25,7 @@ use contr_api::images::v1::images_service_server::ImagesServiceServer;
 use contr_api::integration::v1::integration_service_server::IntegrationServiceServer;
 use contr_api::kubernetes::v1::kubernetes_service_server::KubernetesServiceServer;
 use contr_api::networks::v1::networks_service_server::NetworksServiceServer;
+use contr_api::operations::v1::operations_service_server::OperationsServiceServer;
 use contr_api::settings::v1::settings_service_server::SettingsServiceServer;
 use contr_api::updates::v1::updates_service_server::UpdatesServiceServer;
 use contr_api::volumes::v1::volumes_service_server::VolumesServiceServer;
@@ -33,11 +35,13 @@ use contr_diagnostics::LogRing;
 use contr_transport::{DiscoveryFile, Endpoint, Listener, TransportError};
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
+use tonic::transport::server::Router;
 
 use crate::kubernetes::KubernetesHub;
+use crate::operations::Operations;
 use crate::services::{
     CliLocations, ComposeApi, ContainersApi, DaemonApi, DiagnosticsApi, EngineApi, ImagesApi, IntegrationApi,
-    KubernetesApi, NetworksApi, SettingsApi, Shared, UpdatesApi, VolumesApi, WslAccess,
+    KubernetesApi, NetworksApi, OperationsApi, SettingsApi, Shared, UpdatesApi, VolumesApi, WslAccess,
 };
 use crate::settings::SettingsHub;
 use crate::slot::{DockerContext, EngineSlot};
@@ -146,6 +150,7 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
             .clone()
             .unwrap_or_else(|| product::RELEASES_API.to_owned()),
     );
+    let stopping = CancellationToken::new();
     let shared = Arc::new(Shared {
         supervisor,
         slot,
@@ -160,9 +165,9 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
         kubernetes,
         updates,
         log: config.log.clone(),
-        stopping: CancellationToken::new(),
+        operations: Operations::new(stopping.clone()),
+        stopping: stopping.clone(),
     });
-    let stopping = shared.stopping.clone();
 
     let endpoint = listener.endpoint();
     let discovery = config
@@ -179,29 +184,13 @@ pub async fn run(config: Config, shutdown: impl Future<Output = ()> + Send) -> R
         "serving"
     );
 
-    let served = Server::builder()
-        .add_service(DaemonServiceServer::new(DaemonApi(Arc::clone(&shared))))
-        .add_service(EngineServiceServer::new(EngineApi(Arc::clone(&shared))))
-        .add_service(ContainersServiceServer::new(ContainersApi(Arc::clone(&shared))))
-        .add_service(ImagesServiceServer::new(ImagesApi(Arc::clone(&shared))))
-        .add_service(IntegrationServiceServer::new(IntegrationApi(Arc::clone(&shared))))
-        .add_service(DiagnosticsServiceServer::new(DiagnosticsApi(Arc::clone(&shared))))
-        .add_service(SettingsServiceServer::new(SettingsApi(Arc::clone(&shared))))
-        .add_service(VolumesServiceServer::new(VolumesApi(Arc::clone(&shared))))
-        .add_service(ComposeServiceServer::new(ComposeApi::new(
-            Arc::clone(&shared),
-            config.compose.clone(),
-        )))
-        .add_service(KubernetesServiceServer::new(KubernetesApi(Arc::clone(&shared))))
-        .add_service(UpdatesServiceServer::new(UpdatesApi(Arc::clone(&shared))))
-        .add_service(NetworksServiceServer::new(NetworksApi(shared)))
-        .serve_with_incoming_shutdown(listener.incoming(), {
-            let stopping = stopping.clone();
-            async move {
-                shutdown.await;
-                stopping.cancel();
-            }
-        });
+    let served = router(shared, config.compose.clone()).serve_with_incoming_shutdown(listener.incoming(), {
+        let stopping = stopping.clone();
+        async move {
+            shutdown.await;
+            stopping.cancel();
+        }
+    });
     let served = tokio::select! {
         served = served => served,
         () = async {
@@ -229,6 +218,28 @@ fn start_engine(supervisor: EngineSupervisor) {
             }
         }
     });
+}
+
+/// Every service of the API over `shared`; `compose` is the Compose program given on the command line.
+fn router(shared: Arc<Shared>, compose: Option<PathBuf>) -> Router {
+    let compose = ComposeApi::new(Arc::clone(&shared), compose);
+    Server::builder()
+        .add_service(DaemonServiceServer::new(DaemonApi(Arc::clone(&shared))))
+        .add_service(EngineServiceServer::new(EngineApi(Arc::clone(&shared))))
+        .add_service(ContainersServiceServer::new(ContainersApi(Arc::clone(&shared))))
+        .add_service(ImagesServiceServer::new(ImagesApi(Arc::clone(&shared))))
+        .add_service(IntegrationServiceServer::new(IntegrationApi(Arc::clone(&shared))))
+        .add_service(DiagnosticsServiceServer::new(DiagnosticsApi(Arc::clone(&shared))))
+        .add_service(SettingsServiceServer::new(SettingsApi(Arc::clone(&shared))))
+        .add_service(VolumesServiceServer::new(VolumesApi(Arc::clone(&shared))))
+        .add_service(ComposeServiceServer::new(compose.clone()))
+        .add_service(OperationsServiceServer::new(OperationsApi::new(
+            Arc::clone(&shared),
+            compose,
+        )))
+        .add_service(KubernetesServiceServer::new(KubernetesApi(Arc::clone(&shared))))
+        .add_service(UpdatesServiceServer::new(UpdatesApi(Arc::clone(&shared))))
+        .add_service(NetworksServiceServer::new(NetworksApi(shared)))
 }
 
 fn bind(listen: Option<&Endpoint>) -> Result<Listener, DaemonError> {

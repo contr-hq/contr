@@ -9,6 +9,7 @@ mod images;
 mod integration;
 mod kubernetes;
 mod networks;
+mod operations;
 mod settings;
 mod updates;
 mod volumes;
@@ -16,6 +17,8 @@ mod volumes;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use contr_api::operations::v1::OperationState;
+use contr_api::operations::v1::follow_operation_response::Event;
 use contr_backend::{Backend, BackendKind, Capability, EngineSupervisor};
 use contr_diagnostics::LogRing;
 use futures_util::stream::{self, BoxStream};
@@ -32,11 +35,13 @@ pub(crate) use images::ImagesApi;
 pub(crate) use integration::{CliLocations, IntegrationApi, WslAccess};
 pub(crate) use kubernetes::KubernetesApi;
 pub(crate) use networks::NetworksApi;
+pub(crate) use operations::OperationsApi;
 pub(crate) use settings::SettingsApi;
 pub(crate) use updates::UpdatesApi;
 pub(crate) use volumes::VolumesApi;
 
 use crate::kubernetes::KubernetesHub;
+use crate::operations::{Followed, Operations, Started};
 use crate::settings::SettingsHub;
 use crate::slot::{DockerContext, EngineSlot};
 use crate::status;
@@ -62,6 +67,7 @@ pub(crate) struct Shared {
     pub(crate) kubernetes: Arc<KubernetesHub>,
     pub(crate) updates: Arc<UpdatesHub>,
     pub(crate) log: Option<LogRing>,
+    pub(crate) operations: Arc<Operations>,
     /// Cancelled once the daemon begins to stop.
     pub(crate) stopping: CancellationToken,
 }
@@ -83,4 +89,55 @@ where
         .map(move |change| Ok(convert(change)))
         .chain(stream::once(async { Err(status::engine_not_running()) }))
         .boxed()
+}
+
+/// The stream of an RPC that predates operations for `started`: its events as `convert` turns them into responses,
+/// then the operation's failure as the RPC's status unless an event `reports` it. With `cancel_on_drop`, dropping the
+/// stream cancels an operation this call started.
+fn follow_started<T: Send + 'static>(
+    shared: &Shared,
+    started: &Started,
+    cancel_on_drop: bool,
+    convert: fn(Event) -> Option<T>,
+    reports: fn(&Event) -> bool,
+) -> Result<ResponseStream<T>, Status> {
+    let id = started.operation.id.clone();
+    let followed = shared.operations.follow(&id)?;
+    let guard = (cancel_on_drop && !started.joined).then(|| CancelOnDrop {
+        operations: Arc::clone(&shared.operations),
+        id,
+    });
+    let mut reported = false;
+
+    Ok(followed
+        .filter_map(move |item| {
+            let _ = &guard;
+            let response = match item {
+                Followed::Event(event) => {
+                    reported |= reports(&event);
+                    convert(event).map(Ok)
+                }
+                Followed::Finished(operation) => match operation.state() {
+                    OperationState::Failed if !reported => operation
+                        .error
+                        .as_ref()
+                        .map(|error| Err(status::from_operation_error(error))),
+                    OperationState::Cancelled => Some(Err(Status::cancelled("the operation was cancelled"))),
+                    _ => None,
+                },
+            };
+            async move { response }
+        })
+        .boxed())
+}
+
+struct CancelOnDrop {
+    operations: Arc<Operations>,
+    id: String,
+}
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        let _ = self.operations.cancel(&self.id);
+    }
 }

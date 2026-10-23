@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use bytes::Bytes;
 use contr_api::common::v1 as common;
+use contr_api::operations::v1 as operations;
 use contr_api::settings::v1 as settings;
 use contr_backend::OperationError;
 use contr_core::guest::ConfigRejection;
@@ -122,6 +123,70 @@ fn with_reason(code: Code, message: &str, reason: ErrorReason, remediations: &[R
     Status::with_details(code, message, Bytes::from(status.encode_to_vec()))
 }
 
+/// What a failed operation's `status` says: its code, message, reason and remediations.
+pub(crate) fn operation_error(status: &Status) -> operations::OperationError {
+    let mut error = operations::OperationError {
+        code: status.code().into(),
+        message: status.message().to_owned(),
+        reason: common::ErrorReason::Unspecified.into(),
+        remediations: Vec::new(),
+    };
+    let Ok(details) = pb::Status::decode(status.details()) else {
+        return error;
+    };
+    for detail in details.details {
+        match detail.type_url.as_str() {
+            ERROR_INFO_TYPE => {
+                if let Ok(info) = pb::ErrorInfo::decode(detail.value.as_slice()) {
+                    let reason = common::ErrorReason::from_str_name(&format!("ERROR_REASON_{}", info.reason));
+                    error.reason = reason.unwrap_or(common::ErrorReason::Unspecified).into();
+                }
+            }
+            REMEDIATION_TYPE => {
+                if let Ok(remediation) = common::Remediation::decode(detail.value.as_slice()) {
+                    error.remediations.push(remediation);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    error
+}
+
+/// The status an RPC fails with for a failed operation, with the details [`operation_error`] read.
+pub(crate) fn from_operation_error(error: &operations::OperationError) -> Status {
+    let code = Code::from(error.code);
+    let reason = common::ErrorReason::try_from(error.reason).unwrap_or(common::ErrorReason::Unspecified);
+    if reason == common::ErrorReason::Unspecified && error.remediations.is_empty() {
+        return Status::new(code, error.message.clone());
+    }
+
+    let mut details = Vec::new();
+    if reason != common::ErrorReason::Unspecified {
+        let error_info = pb::ErrorInfo {
+            reason: reason.as_str_name().trim_start_matches("ERROR_REASON_").to_owned(),
+            domain: product::ERROR_DOMAIN.to_owned(),
+            metadata: HashMap::default(),
+        };
+        details.push(Any {
+            type_url: ERROR_INFO_TYPE.to_owned(),
+            value: error_info.encode_to_vec(),
+        });
+    }
+    details.extend(error.remediations.iter().map(|remediation| Any {
+        type_url: REMEDIATION_TYPE.to_owned(),
+        value: remediation.encode_to_vec(),
+    }));
+    let status = pb::Status {
+        code: error.code,
+        message: error.message.clone(),
+        details,
+    };
+
+    Status::with_details(code, error.message.clone(), Bytes::from(status.encode_to_vec()))
+}
+
 /// `contr.common.v1.ErrorReason` value of `reason`.
 pub(crate) fn proto_reason(reason: ErrorReason) -> common::ErrorReason {
     common::ErrorReason::from_str_name(&format!("ERROR_REASON_{}", reason.as_str()))
@@ -131,6 +196,36 @@ pub(crate) fn proto_reason(reason: ErrorReason) -> common::ErrorReason {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn operation_errors_keep_the_reason_and_remediations() {
+        let remediation = Remediation {
+            action_id: "install-wsl",
+            requires_elevation: true,
+        };
+        let status = with_reason(
+            Code::FailedPrecondition,
+            "WSL is not installed",
+            ErrorReason::WslNotInstalled,
+            &[remediation],
+        );
+
+        let error = operation_error(&status);
+        let again = operation_error(&from_operation_error(&error));
+
+        assert_eq!(error.code, i32::from(Code::FailedPrecondition));
+        assert_eq!(error.reason(), common::ErrorReason::WslNotInstalled);
+        assert_eq!(error.remediations[0].action_id, "install-wsl");
+        assert_eq!(again, error);
+    }
+
+    #[test]
+    fn plain_statuses_become_plain_errors() {
+        let error = operation_error(&Status::not_found("no such image"));
+
+        assert_eq!(error.reason(), common::ErrorReason::Unspecified);
+        assert_eq!(from_operation_error(&error).code(), Code::NotFound);
+    }
 
     #[test]
     fn every_reason_has_a_proto_value() {
