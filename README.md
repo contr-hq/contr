@@ -25,7 +25,8 @@ generator. The desktop clients live in their own repositories and talk to the da
   owns it, so `docker` works without a context. Windows bind paths such as `-v C:\src:/w` work, and
   `host.docker.internal` reaches services on the Windows host, including those bound to `localhost`. A port a
   container publishes listens on Windows at the address Docker reports: `-p 8080:80` on every interface, and
-  `-p 127.0.0.1:8080:80` on loopback only.
+  `-p 127.0.0.1:8080:80` on loopback only. Other computers reach a published port once Windows Firewall allows it;
+  see [Published ports and Windows Firewall](#published-ports-and-windows-firewall).
   `contr cli install` installs the bundled Docker CLI, Compose and Buildx for the user. `contr wsl enable <name>`
   gives one of the user's own WSL 2 distributions `docker`, Compose and Buildx on the same engine, with binds of
   the distribution's paths.
@@ -41,6 +42,20 @@ file, for example `{"engine": {"serveDefaultPipe": false}}`, or `{"updates": {"c
 checks. On Windows it is the `Settings` string value of `HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Contr`; on Linux it is
 `/etc/contr/admin-settings.json`. Clients show those settings as managed by the organization, and the daemon refuses
 changes to them.
+
+## Published ports and Windows Firewall
+
+Contr installs for one user without administrator rights and adds no firewall rule. The first time a container
+publishes a port on every interface, Windows asks whether Contr daemon may accept connections from networks. A
+standard user cannot allow it, and Windows then blocks inbound connections to `contrd.exe`. The port still answers on
+the computer itself; other computers reach it once an administrator allows it:
+
+1. Open Windows Defender Firewall with Advanced Security (`wf.msc`) as an administrator.
+2. Under Inbound Rules, open each Contr daemon rule whose action is Block and whose profile covers the networks that
+   should reach published ports, usually Private, and choose Allow the connection.
+
+A Block rule wins over every Allow rule for the same program, so a separate Allow rule is not enough. An administrator
+who answers the first prompt allows it there.
 
 ## Layout
 
