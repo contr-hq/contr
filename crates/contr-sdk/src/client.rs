@@ -14,6 +14,7 @@ use contr_api::images::v1::images_service_client::ImagesServiceClient;
 use contr_api::integration::v1::integration_service_client::IntegrationServiceClient;
 use contr_api::kubernetes::v1::kubernetes_service_client::KubernetesServiceClient;
 use contr_api::networks::v1::networks_service_client::NetworksServiceClient;
+use contr_api::operations::v1::operations_service_client::OperationsServiceClient;
 use contr_api::settings::v1::settings_service_client::SettingsServiceClient;
 use contr_api::updates::v1::updates_service_client::UpdatesServiceClient;
 use contr_api::volumes::v1::volumes_service_client::VolumesServiceClient;
@@ -154,6 +155,11 @@ impl Client {
     /// Update check service.
     pub fn updates(&self) -> UpdatesServiceClient<Channel> {
         UpdatesServiceClient::new(self.channel.clone())
+    }
+
+    /// Long-running operation service.
+    pub fn operations(&self) -> OperationsServiceClient<Channel> {
+        OperationsServiceClient::new(self.channel.clone())
     }
 
     /// Daemon and engine description.

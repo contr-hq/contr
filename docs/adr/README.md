@@ -13,3 +13,4 @@ Each record states Context → Decision → Consequences. A superseded record st
 | [0007](0007-wsl-distribution-integration.md) | The user's WSL distributions reach the engine through a relayed socket and a shared root mount |
 | [0008](0008-windows-packages-carry-every-runtime.md) | Windows packages carry every runtime |
 | [0009](0009-proxy-variables-from-the-engine-proxy.md) | Containers and builds receive the engine's proxy from the engine proxy |
+| [0010](0010-daemon-owned-operations.md) | Long-running work runs as operations the daemon owns |
