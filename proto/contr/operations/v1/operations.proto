@@ -1,0 +1,136 @@
+syntax = "proto3";
+
+package contr.operations.v1;
+
+import "contr/common/v1/errors.proto";
+import "contr/common/v1/progress.proto";
+import "contr/compose/v1/compose.proto";
+import "contr/diagnostics/v1/diagnostics.proto";
+import "contr/engine/v1/engine.proto";
+import "contr/images/v1/images.proto";
+import "contr/kubernetes/v1/kubernetes.proto";
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Contr.Sdk.Operations.V1";
+
+// Long-running work the daemon runs on its own tasks, so it continues after the client that started it disconnects;
+// see docs/adr/0010-daemon-owned-operations.md.
+service OperationsService {
+  // Validates the request as the RPC that takes the same message does, starts the operation and returns it. Returns
+  // the running operation instead for a pull of the same reference and platform, a push of the same reference, a
+  // bundle, a remediation with the same action and an engine operation of the same kind and scope; fails with
+  // FAILED_PRECONDITION for a Compose action on a project with a running action.
+  rpc StartOperation(StartOperationRequest) returns (StartOperationResponse);
+  // Streams every operation the daemon keeps, then every change to them.
+  rpc WatchOperations(WatchOperationsRequest) returns (stream WatchOperationsResponse);
+  // Replays the events the daemon kept for one operation, then streams new ones, and ends with the operation in its
+  // final state; fails with NOT_FOUND for an operation the daemon no longer keeps. Cancelling the call does not
+  // cancel the operation.
+  rpc FollowOperation(FollowOperationRequest) returns (stream FollowOperationResponse);
+  // Cancels a running operation; does nothing for a finished one, and fails with FAILED_PRECONDITION for one that
+  // cannot be cancelled and NOT_FOUND for one the daemon no longer keeps.
+  rpc CancelOperation(CancelOperationRequest) returns (CancelOperationResponse);
+}
+
+// Work the daemon runs or ran; finished operations stay for an hour, at most the 50 most recent.
+message Operation {
+  // Unique among the operations of every daemon process.
+  string id = 1;
+  OperationRequest request = 2;
+  OperationState state = 3;
+  // Latest step; absent before the first one.
+  contr.common.v1.Progress progress = 4;
+  google.protobuf.Timestamp started_at = 5;
+  // Absent while running.
+  google.protobuf.Timestamp finished_at = 6;
+  bool cancellable = 7;
+  // Set only in OPERATION_STATE_FAILED.
+  OperationError error = 8;
+}
+
+// What an operation does, as the request message of the RPC that does the same.
+message OperationRequest {
+  oneof kind {
+    contr.images.v1.PullImageRequest pull_image = 1;
+    contr.images.v1.PushImageRequest push_image = 2;
+    contr.compose.v1.RunActionRequest compose_action = 3;
+    contr.kubernetes.v1.ImportImagesRequest import_images = 4;
+    contr.diagnostics.v1.CreateBundleRequest create_bundle = 5;
+    contr.diagnostics.v1.RunRemediationRequest run_remediation = 6;
+    contr.engine.v1.StartRequest start_engine = 7;
+    contr.engine.v1.StopRequest stop_engine = 8;
+    contr.engine.v1.RestartRequest restart_engine = 9;
+    contr.engine.v1.ResetRequest reset_engine = 10;
+  }
+}
+
+enum OperationState {
+  OPERATION_STATE_UNSPECIFIED = 0;
+  OPERATION_STATE_RUNNING = 1;
+  OPERATION_STATE_SUCCEEDED = 2;
+  OPERATION_STATE_FAILED = 3;
+  OPERATION_STATE_CANCELLED = 4;
+}
+
+// Why an operation failed, as the gRPC status of the RPC that does the same work would say; a Compose action whose
+// Compose exits non-zero fails with UNKNOWN.
+message OperationError {
+  // gRPC status code.
+  int32 code = 1;
+  string message = 2;
+  // UNSPECIFIED when the failure has no reason clients branch on.
+  contr.common.v1.ErrorReason reason = 3;
+  // Actions the daemon can run to resolve the failure.
+  repeated contr.common.v1.Remediation remediations = 4;
+}
+
+message StartOperationRequest {
+  OperationRequest request = 1;
+}
+
+message StartOperationResponse {
+  Operation operation = 1;
+}
+
+message WatchOperationsRequest {}
+
+message WatchOperationsResponse {
+  oneof event {
+    // Sent first and again after the client falls behind; replaces every operation the client holds.
+    OperationSnapshot snapshot = 1;
+    Operation upserted = 2;
+    string removed_id = 3;
+  }
+}
+
+// Every operation at one point in time.
+message OperationSnapshot {
+  repeated Operation operations = 1;
+}
+
+message FollowOperationRequest {
+  string id = 1;
+}
+
+message FollowOperationResponse {
+  oneof event {
+    contr.images.v1.PullImageResponse pull_image = 1;
+    contr.images.v1.PushImageResponse push_image = 2;
+    contr.compose.v1.RunActionResponse compose_action = 3;
+    contr.kubernetes.v1.ImportImagesResponse import_images = 4;
+    contr.diagnostics.v1.CreateBundleResponse create_bundle = 5;
+    contr.diagnostics.v1.RunRemediationResponse run_remediation = 6;
+    // Step of an engine operation.
+    contr.common.v1.Progress engine_progress = 7;
+    // State an engine operation left the engine in; sent just before `finished` when the operation succeeded.
+    contr.engine.v1.EngineState engine_state = 8;
+    // Last message of the stream.
+    Operation finished = 9;
+  }
+}
+
+message CancelOperationRequest {
+  string id = 1;
+}
+
+message CancelOperationResponse {}

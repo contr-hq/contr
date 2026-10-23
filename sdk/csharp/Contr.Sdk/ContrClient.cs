@@ -9,6 +9,7 @@ using Contr.Sdk.Images.V1;
 using Contr.Sdk.Integration.V1;
 using Contr.Sdk.Kubernetes.V1;
 using Contr.Sdk.Networks.V1;
+using Contr.Sdk.Operations.V1;
 using Contr.Sdk.Settings.V1;
 using Contr.Sdk.Updates.V1;
 using Contr.Sdk.Volumes.V1;
@@ -42,6 +43,7 @@ public sealed class ContrClient : IDisposable
         Diagnostics = new DiagnosticsService.DiagnosticsServiceClient(channel);
         Settings = new SettingsService.SettingsServiceClient(channel);
         Updates = new UpdatesService.UpdatesServiceClient(channel);
+        Operations = new OperationsService.OperationsServiceClient(channel);
     }
 
     /// <summary>Value of <c>proto/API_REVISION</c> this SDK was generated from.</summary>
@@ -88,6 +90,9 @@ public sealed class ContrClient : IDisposable
 
     /// <summary>Whether a newer Contr is published.</summary>
     public UpdatesService.UpdatesServiceClient Updates { get; }
+
+    /// <summary>Long-running work the daemon owns, which goes on after the client that started it disconnects.</summary>
+    public OperationsService.OperationsServiceClient Operations { get; }
 
     /// <summary>Connects to <paramref name="endpoint"/>, or to <see cref="ContrEndpoint.Resolve"/>, and performs the handshake.</summary>
     public static async Task<ContrClient> ConnectAsync(
