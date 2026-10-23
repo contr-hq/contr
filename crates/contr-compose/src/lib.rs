@@ -5,4 +5,4 @@ mod project;
 mod runner;
 
 pub use project::{Added, Declared, DeclaredService, added_name, config_files, group, labels};
-pub use runner::{Compose, ComposeError, Output, Target};
+pub use runner::{Compose, ComposeError, Invocation, Output, Target};

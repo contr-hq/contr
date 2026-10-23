@@ -111,6 +111,17 @@ impl Compose {
         services: &[String],
         remove_volumes: bool,
     ) -> Result<BoxStream<'static, io::Result<Output>>, ComposeError> {
+        self.prepare(target, action, services, remove_volumes)?.run()
+    }
+
+    /// Checks `action` and builds the Compose command that [`Compose::run`] would start, without starting it.
+    pub fn prepare(
+        &self,
+        target: &Target,
+        action: Action,
+        services: &[String],
+        remove_volumes: bool,
+    ) -> Result<Invocation, ComposeError> {
         let (verb, needs_files) = match action {
             Action::Up => ("up", true),
             Action::Pull => ("pull", true),
@@ -145,7 +156,37 @@ impl Compose {
                 command.args(services);
             }
         }
-        let mut child = command
+
+        Ok(Invocation(command))
+    }
+
+    /// Compose with plain output, against this engine, outside any directory holding Compose files.
+    fn command(&self) -> Command {
+        let mut command = Command::new(&self.program);
+        command
+            .args(["--ansi", "never", "--progress", "plain"])
+            .env("DOCKER_HOST", &self.docker_host)
+            .env_remove("DOCKER_CONTEXT")
+            .env_remove("COMPOSE_FILE")
+            .env_remove("COMPOSE_PROJECT_NAME")
+            .current_dir(env::temp_dir())
+            .stdin(Stdio::null())
+            .kill_on_drop(true);
+        #[cfg(windows)]
+        command.creation_flags(CREATE_NO_WINDOW);
+        command
+    }
+}
+
+/// A Compose command [`Compose::prepare`] checked, ready to start.
+#[derive(Debug)]
+pub struct Invocation(Command);
+
+impl Invocation {
+    /// Starts Compose and streams its output; dropping the stream kills Compose.
+    pub fn run(mut self) -> Result<BoxStream<'static, io::Result<Output>>, ComposeError> {
+        let mut child = self
+            .0
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -167,23 +208,6 @@ impl Compose {
         });
 
         Ok(lines.chain(exit).boxed())
-    }
-
-    /// Compose with plain output, against this engine, outside any directory holding Compose files.
-    fn command(&self) -> Command {
-        let mut command = Command::new(&self.program);
-        command
-            .args(["--ansi", "never", "--progress", "plain"])
-            .env("DOCKER_HOST", &self.docker_host)
-            .env_remove("DOCKER_CONTEXT")
-            .env_remove("COMPOSE_FILE")
-            .env_remove("COMPOSE_PROJECT_NAME")
-            .current_dir(env::temp_dir())
-            .stdin(Stdio::null())
-            .kill_on_drop(true);
-        #[cfg(windows)]
-        command.creation_flags(CREATE_NO_WINDOW);
-        command
     }
 }
 
